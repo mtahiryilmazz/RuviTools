@@ -1,0 +1,34 @@
+# Rust / Cargo
+/target/
+**/*.rs.bk
+*.pdb
+
+# Build & ara çıktılar
+/build/
+/dist/
+/out/
+*.tmp
+*.log
+
+# Medya test fixture'ları (büyük ikili dosyalar)
+/fixtures/media/
+*.mp4
+*.mkv
+*.webm
+*.m4a
+*.ts
+*.m3u8
+!fixtures/**/*.json
+
+# Editör / OS
+.vscode/
+.idea/
+*.swp
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Ortam ve sırlar
+.env
+.env.*
+*.pem
