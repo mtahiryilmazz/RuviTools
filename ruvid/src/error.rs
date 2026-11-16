@@ -97,7 +97,7 @@ impl RuviError {
             ok: false,
             exit_code: code.code(),
             category: code.category().to_string(),
-            message: self.to_string(),
+            message: crate::domain::media_manifest::redact_urls_in_text(&self.to_string()),
             detail: None,
         }
     }

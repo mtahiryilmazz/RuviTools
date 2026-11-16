@@ -61,7 +61,7 @@ impl ContainerFormat {
             "flac" => Ok(Self::Flac),
             "aac" | "adts" => Ok(Self::Aac),
             "wav" => Ok(Self::Wav),
-            "ogg" | "oga" => Ok(Self::Ogg),
+            "ogg" | "oga" | "opus" => Ok(Self::Ogg),
             "jpg" | "jpeg" => Ok(Self::Jpg),
             "png" => Ok(Self::Png),
             "webp" => Ok(Self::Webp),

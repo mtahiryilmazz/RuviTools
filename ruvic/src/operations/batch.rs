@@ -69,6 +69,9 @@ pub async fn execute_batch(
         .map(|e| e.path())
         .filter(|p| {
             p.is_file()
+                && p.file_name()
+                    .and_then(|n| n.to_str())
+                    .is_some_and(|n| !n.contains(".ruvic-tmp-"))
                 && p.extension().and_then(|e| e.to_str()).is_some_and(|ext| {
                     SUPPORTED_MEDIA_EXTENSIONS.contains(&ext.to_ascii_lowercase().as_str())
                 })

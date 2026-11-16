@@ -24,10 +24,13 @@ pub async fn execute_download(
     job: DownloadJob,
     show_progress: bool,
 ) -> RuviResult<DownloadOutcome> {
-    if job.to_stdout && job.write_manifest.as_deref() == Some(Path::new("-")) {
-        return Err(RuviError::InvalidArgument(
-            "--stdout cannot be combined with --write-manifest -".to_string(),
-        ));
+    if job.write_manifest.as_deref() == Some(Path::new("-")) {
+        let msg = if job.to_stdout {
+            "--stdout cannot be combined with --write-manifest -"
+        } else {
+            "writing JSON handoff manifest to stdout ('-') is unsupported; specify a file path"
+        };
+        return Err(RuviError::InvalidArgument(msg.to_string()));
     }
 
     let rate_spec = job
@@ -47,6 +50,19 @@ pub async fn execute_download(
     )?;
 
     let source = ResolverRegistry::resolve(&ctx, &job.url).await?;
+    let ctx = if let Some(ref ua_override) = source.user_agent_override {
+        ResolveContext::build(
+            ua_override,
+            config.network.connect_timeout_seconds,
+            job.timeout_seconds,
+            job.proxy.as_deref().or(config.network.proxy.as_deref()),
+            &job.headers,
+            job.allow_private_net || config.network.allow_private_network,
+            job.retry_count,
+        )?
+    } else {
+        ctx
+    };
     let selected = select_stream(&source.streams, &job.format_spec)?.clone();
 
     let output_path = if job.to_stdout {
@@ -216,10 +232,11 @@ async fn download_matching_subtitles(
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    let stem = media_output
+    let raw_stem = media_output
         .file_stem()
         .and_then(|s| s.to_str())
         .unwrap_or("media");
+    let stem = sanitize_filename(raw_stem);
 
     for track in tracks {
         if let Some(wanted) = lang_filter

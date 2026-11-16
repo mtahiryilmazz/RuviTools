@@ -99,7 +99,16 @@ pub async fn download_direct_http(
     cancel: &CancellationToken,
 ) -> RuviResult<DirectDownloadStats> {
     if plan.to_stdout {
-        let bytes = stream_to_stdout(ctx, url, plan.retry_count, limiter, progress, cancel).await?;
+        let bytes = stream_to_stdout(
+            ctx,
+            url,
+            total_bytes,
+            plan.retry_count,
+            limiter,
+            progress,
+            cancel,
+        )
+        .await?;
         return Ok(DirectDownloadStats {
             bytes_downloaded: bytes,
             resumed: false,
@@ -149,6 +158,7 @@ pub async fn download_direct_http(
             last_modified.as_deref(),
             Some(total),
         )?;
+        loaded.verify_range_plan(total, chunk_size, chunks_total)?;
         if !part_path.exists() || std::fs::metadata(&part_path)?.len() != total {
             return Err(RuviError::Integrity(
                 "partial file missing or size mismatch for checkpoint; use --no-resume to restart"
@@ -461,6 +471,15 @@ async fn download_single_stream(
                 return Err(RetryableError::from_status(status, final_url.as_str()));
             }
 
+            let resp_content_len = resp.content_length();
+            if let (Some(exp), Some(actual_cl)) = (expected_total, resp_content_len)
+                && exp != actual_cl
+            {
+                return Err(RetryableError::Permanent(RuviError::Integrity(format!(
+                    "downloaded byte count mismatch: expected {exp} bytes, got Content-Length {actual_cl} bytes"
+                ))));
+            }
+
             let resp_etag = resp
                 .headers()
                 .get(ETAG)
@@ -497,6 +516,13 @@ async fn download_single_stream(
             }
             file.flush()
                 .map_err(|err| RetryableError::Permanent(RuviError::Io(err)))?;
+            if let Some(cl) = resp_content_len
+                && written != cl
+            {
+                return Err(RetryableError::Permanent(RuviError::Integrity(format!(
+                    "downloaded byte count mismatch: expected {cl} bytes, got {written} bytes"
+                ))));
+            }
             Ok(written)
         }
     })
@@ -522,6 +548,7 @@ async fn download_single_stream(
 async fn stream_to_stdout(
     ctx: &ResolveContext,
     url: &str,
+    expected_total: Option<u64>,
     retry_count: u32,
     limiter: &RateLimiter,
     progress: &DownloadProgress,
@@ -546,6 +573,15 @@ async fn stream_to_stdout(
             ));
         }
 
+        let resp_content_len = resp.content_length();
+        if let (Some(exp), Some(actual_cl)) = (expected_total, resp_content_len)
+            && exp != actual_cl
+        {
+            return Err(RetryableError::Permanent(RuviError::Integrity(format!(
+                "downloaded byte count mismatch: expected {exp} bytes, got Content-Length {actual_cl} bytes"
+            ))));
+        }
+
         let mut written = 0u64;
         let mut stream = resp.bytes_stream();
         while let Some(item) = stream.next().await {
@@ -567,6 +603,13 @@ async fn stream_to_stdout(
             }
             written += bytes.len() as u64;
             progress.inc(bytes.len() as u64);
+        }
+        if let Some(expected) = expected_total.or(resp_content_len)
+            && written != expected
+        {
+            return Err(RetryableError::Permanent(RuviError::Integrity(format!(
+                "downloaded byte count mismatch: expected {expected} bytes, got {written} bytes"
+            ))));
         }
         Ok(written)
     })

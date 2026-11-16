@@ -13,6 +13,7 @@ pub fn build_ffprobe_args(input: &str) -> Vec<String> {
         "-show_format".to_string(),
         "-show_streams".to_string(),
         "-show_chapters".to_string(),
+        "-i".to_string(),
         input.to_string(),
     ]
 }

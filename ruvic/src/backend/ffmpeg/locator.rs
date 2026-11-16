@@ -20,11 +20,25 @@ pub fn try_locate_ffmpeg(
     cfg_ffmpeg: Option<&Path>,
     cfg_ffprobe: Option<&Path>,
 ) -> DiscoveredLocations {
-    let env_ffmpeg = std::env::var_os("RUVIC_FFMPEG_PATH").map(PathBuf::from);
-    let env_ffprobe = std::env::var_os("RUVIC_FFPROBE_PATH").map(PathBuf::from);
+    let env_ffmpeg = std::env::var_os("RUVIC_FFMPEG_PATH")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from);
+    let env_ffprobe = std::env::var_os("RUVIC_FFPROBE_PATH")
+        .filter(|v| !v.is_empty())
+        .map(PathBuf::from);
 
-    let ffmpeg = resolve_binary("ffmpeg", cli_ffmpeg, env_ffmpeg.as_deref(), cfg_ffmpeg);
-    let ffprobe = resolve_binary("ffprobe", cli_ffprobe, env_ffprobe.as_deref(), cfg_ffprobe);
+    let ffmpeg = resolve_binary(
+        "ffmpeg",
+        cli_ffmpeg.filter(|p| !p.as_os_str().is_empty()),
+        env_ffmpeg.as_deref(),
+        cfg_ffmpeg.filter(|p| !p.as_os_str().is_empty()),
+    );
+    let ffprobe = resolve_binary(
+        "ffprobe",
+        cli_ffprobe.filter(|p| !p.as_os_str().is_empty()),
+        env_ffprobe.as_deref(),
+        cfg_ffprobe.filter(|p| !p.as_os_str().is_empty()),
+    );
 
     DiscoveredLocations { ffmpeg, ffprobe }
 }
@@ -57,16 +71,15 @@ fn resolve_binary(
     env_override: Option<&Path>,
     cfg_override: Option<&Path>,
 ) -> Option<PathBuf> {
-    for explicit in [cli_override, env_override, cfg_override]
+    if let Some(explicit) = [cli_override, env_override, cfg_override]
         .into_iter()
         .flatten()
+        .next()
     {
         if explicit.is_file() {
             return Some(explicit.to_path_buf());
         }
-        if let Some(found) = search_in_path(explicit) {
-            return Some(found);
-        }
+        return search_in_path(explicit);
     }
     search_in_path(Path::new(default_name))
 }
@@ -76,9 +89,27 @@ fn search_in_path(candidate: &Path) -> Option<PathBuf> {
         return candidate.is_file().then(|| candidate.to_path_buf());
     }
 
-    let path_var = std::env::var_os("PATH")?;
+    let path_var = std::env::var_os("PATH");
+    let mut dirs: Vec<PathBuf> = path_var
+        .as_deref()
+        .map(std::env::split_paths)
+        .into_iter()
+        .flatten()
+        .collect();
+
+    #[cfg(windows)]
+    if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {
+        let winget_links = PathBuf::from(local_app_data)
+            .join("Microsoft")
+            .join("WinGet")
+            .join("Links");
+        if winget_links.is_dir() {
+            dirs.push(winget_links);
+        }
+    }
+
     let file_name = candidate.to_string_lossy();
-    for dir in std::env::split_paths(&path_var) {
+    for dir in dirs {
         let direct = dir.join(&*file_name);
         if direct.is_file() {
             return Some(direct);

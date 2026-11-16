@@ -2,7 +2,8 @@ use std::path::Path;
 use std::sync::Arc;
 
 use futures::StreamExt;
-use reqwest::header::RANGE;
+use reqwest::StatusCode;
+use reqwest::header::{CONTENT_RANGE, RANGE};
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -57,6 +58,7 @@ pub async fn download_segmented_stream(
         let loaded = DownloadCheckpoint::load(&ckpt_path)?
             .ok_or_else(|| RuviError::Integrity("segment checkpoint disappeared".to_string()))?;
         loaded.verify_identity(source_manifest_url, &plan.stream.id, None, None, None)?;
+        loaded.verify_segment_plan(total_segs)?;
         loaded
     } else {
         let fresh = DownloadCheckpoint::new(
@@ -200,6 +202,29 @@ pub async fn fetch_segment_bytes(
             return Err(RetryableError::from_status(status, final_url.as_str()));
         }
 
+        if let Some(br) = byte_range
+            && status == StatusCode::PARTIAL_CONTENT
+        {
+            let expected_end = br.offset + br.length.saturating_sub(1);
+            let cr = resp
+                .headers()
+                .get(CONTENT_RANGE)
+                .and_then(|v| v.to_str().ok())
+                .and_then(crate::downloader::http_range::parse_content_range_header)
+                .ok_or_else(|| {
+                    RetryableError::Permanent(RuviError::Integrity(
+                        "206 segment response missing valid Content-Range header".to_string(),
+                    ))
+                })?;
+            if cr.0 != br.offset || cr.1 != expected_end {
+                return Err(RetryableError::Permanent(RuviError::Integrity(format!(
+                    "segment Content-Range mismatch: expected {}-{expected_end}, got {}-{}",
+                    br.offset, cr.0, cr.1
+                ))));
+            }
+        }
+
+        let resp_content_len = resp.content_length();
         let mut buf = Vec::new();
         let mut stream = resp.bytes_stream();
         while let Some(item) = stream.next().await {
@@ -213,6 +238,48 @@ pub async fn fetch_segment_bytes(
             progress.inc(chunk.len() as u64);
             buf.extend_from_slice(&chunk);
         }
+
+        if let Some(cl) = resp_content_len
+            && buf.len() as u64 != cl
+        {
+            return Err(RetryableError::Permanent(RuviError::Integrity(format!(
+                "segment byte count mismatch: expected {cl} bytes, got {} bytes",
+                buf.len()
+            ))));
+        }
+
+        if let Some(br) = byte_range {
+            if status == StatusCode::OK {
+                let start = usize::try_from(br.offset).map_err(|_| {
+                    RetryableError::Permanent(RuviError::Integrity(
+                        "segment byte-range offset overflow".to_string(),
+                    ))
+                })?;
+                let end = br
+                    .offset
+                    .checked_add(br.length)
+                    .and_then(|v| usize::try_from(v).ok())
+                    .ok_or_else(|| {
+                        RetryableError::Permanent(RuviError::Integrity(
+                            "segment byte-range end overflow".to_string(),
+                        ))
+                    })?;
+                if buf.len() < end {
+                    return Err(RetryableError::Permanent(RuviError::Integrity(format!(
+                        "segment byte-range exceeds response size: need {end}, got {}",
+                        buf.len()
+                    ))));
+                }
+                return Ok(buf[start..end].to_vec());
+            } else if buf.len() as u64 != br.length {
+                return Err(RetryableError::Permanent(RuviError::Integrity(format!(
+                    "segment byte-range length mismatch: expected {}, got {}",
+                    br.length,
+                    buf.len()
+                ))));
+            }
+        }
+
         Ok(buf)
     })
     .await

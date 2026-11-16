@@ -196,6 +196,7 @@ pub fn resolve_direct_http_from_probe(original_url: &str, meta: HttpProbeMetadat
         default_ext: ext,
         streams: vec![stream],
         subtitles: Vec::new(),
+        user_agent_override: None,
     }
 }
 

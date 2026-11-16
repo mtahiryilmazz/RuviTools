@@ -4,7 +4,8 @@ use crate::domain::output_spec::OverwritePolicy;
 use crate::error::{RuviError, RuviResult};
 
 pub fn ensure_output_parent(output: &Path, overwrite: OverwritePolicy) -> RuviResult<()> {
-    if output.exists() && overwrite == OverwritePolicy::Reject {
+    let output_exists = output.exists() || std::fs::symlink_metadata(output).is_ok();
+    if output_exists && overwrite == OverwritePolicy::Reject {
         return Err(RuviError::Filesystem(format!(
             "output file already exists: {} (pass --overwrite to replace)",
             output.display()

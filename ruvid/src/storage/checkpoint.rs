@@ -57,6 +57,13 @@ impl DownloadCheckpoint {
         let ckpt: Self = serde_json::from_str(&raw).map_err(|err| {
             RuviError::Integrity(format!("corrupted checkpoint {}: {err}", path.display()))
         })?;
+        if ckpt.version != 1 {
+            return Err(RuviError::Integrity(format!(
+                "unsupported checkpoint version {} in {}",
+                ckpt.version,
+                path.display()
+            )));
+        }
         Ok(Some(ckpt))
     }
 
@@ -113,6 +120,52 @@ impl DownloadCheckpoint {
             return Err(RuviError::Integrity(format!(
                 "remote Last-Modified changed ({prev} -> {curr}); refusing stale resume"
             )));
+        }
+        Ok(())
+    }
+
+    pub fn verify_range_plan(
+        &self,
+        expected_total_bytes: u64,
+        expected_chunk_size: u64,
+        expected_chunks_total: usize,
+    ) -> RuviResult<()> {
+        if self.total_bytes != Some(expected_total_bytes) {
+            return Err(RuviError::Integrity(
+                "checkpoint total byte count mismatch; cannot safely resume".to_string(),
+            ));
+        }
+        if self.chunk_size != expected_chunk_size || self.chunks_total != expected_chunks_total {
+            return Err(RuviError::Integrity(
+                "checkpoint chunk layout mismatch; cannot safely resume".to_string(),
+            ));
+        }
+        if self
+            .completed_chunks
+            .iter()
+            .any(|&idx| idx >= expected_chunks_total)
+        {
+            return Err(RuviError::Integrity(
+                "corrupted checkpoint contains out-of-range chunk index".to_string(),
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn verify_segment_plan(&self, total_segments: usize) -> RuviResult<()> {
+        if self.chunks_total != total_segments {
+            return Err(RuviError::Integrity(
+                "checkpoint segment count mismatch; cannot safely resume".to_string(),
+            ));
+        }
+        if self
+            .completed_segments
+            .iter()
+            .any(|&idx| idx >= total_segments)
+        {
+            return Err(RuviError::Integrity(
+                "corrupted checkpoint contains out-of-range segment index".to_string(),
+            ));
         }
         Ok(())
     }

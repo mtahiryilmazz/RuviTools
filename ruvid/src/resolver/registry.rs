@@ -1,20 +1,27 @@
 use url::Url;
 
+use crate::domain::media_manifest::redact_sensitive_url;
 use crate::domain::media_source::{MediaSource, SourceKind};
+use crate::domain::stream::StreamPayload;
 use crate::error::{RuviError, RuviResult};
-use crate::resolver::ResolveContext;
 use crate::resolver::dash::resolve_dash_from_xml;
 use crate::resolver::direct_http::{probe_http_resource, resolve_direct_http_from_probe};
 use crate::resolver::hls::resolve_hls;
+use crate::resolver::platform::youtube::{
+    is_youtube_url, resolve_youtube_from_html, resolve_youtube_url,
+};
 use crate::resolver::platform::{
     HtmlMetadataPlatformResolver, PlatformResolver, extract_title_from_html, with_html_title,
 };
+use crate::resolver::{ResolveContext, validate_url_security};
 
 pub struct ResolverRegistry;
 
 impl ResolverRegistry {
     pub async fn resolve(ctx: &ResolveContext, raw_url: &str) -> RuviResult<MediaSource> {
-        Self::resolve_inner(ctx, raw_url, 0).await
+        let source = Self::resolve_inner(ctx, raw_url, 0).await?;
+        validate_media_source_urls(&source, ctx.allow_private_net)?;
+        Ok(source)
     }
 
     #[allow(clippy::too_many_lines)]
@@ -32,6 +39,9 @@ impl ResolverRegistry {
             }
 
             let parsed = ctx.validate_url(raw_url)?;
+            if is_youtube_url(&parsed) {
+                return resolve_youtube_url(ctx, raw_url).await;
+            }
             let url_path = parsed.path().to_ascii_lowercase();
 
             if url_path.ends_with(".m3u8") {
@@ -64,6 +74,11 @@ impl ResolverRegistry {
             let html_resolver = HtmlMetadataPlatformResolver;
             if html_resolver.can_handle(&probe.final_url, ct) {
                 let (html, final_url, _) = ctx.fetch_text_limited(probe.final_url.as_str()).await?;
+                if let Some(yt_source) =
+                    resolve_youtube_from_html(ctx, raw_url, &final_url, &html).await?
+                {
+                    return Ok(yt_source);
+                }
                 let page_title = extract_title_from_html(&html);
                 if let Some(target) = html_resolver
                     .resolve(ctx, raw_url, &final_url, &html)
@@ -77,13 +92,62 @@ impl ResolverRegistry {
                 }
                 return Err(RuviError::Unsupported(format!(
                     "no playable media link found in HTML page {}",
-                    final_url
+                    redact_sensitive_url(final_url.as_str())
                 )));
             }
 
             Ok(resolve_direct_http_from_probe(raw_url, probe))
         })
     }
+}
+
+fn validate_media_source_urls(source: &MediaSource, allow_private_net: bool) -> RuviResult<()> {
+    let check_url = |raw: &str| -> RuviResult<()> {
+        let parsed = Url::parse(raw).map_err(|err| {
+            RuviError::Unsupported(format!(
+                "invalid resolved URL '{}': {err}",
+                redact_sensitive_url(raw)
+            ))
+        })?;
+        validate_url_security(&parsed, allow_private_net)
+    };
+
+    for stream in &source.streams {
+        match &stream.payload {
+            StreamPayload::DirectHttp { url, .. } => check_url(url)?,
+            StreamPayload::Hls {
+                playlist_url,
+                init_segment_url,
+                segments,
+                ..
+            } => {
+                check_url(playlist_url)?;
+                if let Some(init) = init_segment_url {
+                    check_url(init)?;
+                }
+                for seg in segments {
+                    check_url(&seg.url)?;
+                }
+            }
+            StreamPayload::Dash {
+                mpd_url,
+                init_segment_url,
+                segments,
+            } => {
+                check_url(mpd_url)?;
+                if let Some(init) = init_segment_url {
+                    check_url(init)?;
+                }
+                for seg in segments {
+                    check_url(&seg.url)?;
+                }
+            }
+        }
+    }
+    for sub in &source.subtitles {
+        check_url(&sub.url)?;
+    }
+    Ok(())
 }
 
 pub fn parse_item_selection(spec: &str, total: usize) -> RuviResult<Vec<usize>> {

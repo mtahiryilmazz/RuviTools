@@ -5,6 +5,7 @@ use std::time::Duration;
 use tokio::process::Command;
 
 use crate::backend::BackendCapabilities;
+use crate::backend::ffmpeg::process::sanitize_log_line;
 use crate::error::{RuviError, RuviResult};
 
 const CAPABILITY_PROBE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -48,7 +49,7 @@ async fn run_simple_query(bin: &Path, args: &[&str]) -> RuviResult<String> {
         .map_err(|err| RuviError::Backend(format!("failed to invoke {}: {err}", bin.display())))?;
 
     if !output.status.success() {
-        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stderr = sanitize_log_line(&String::from_utf8_lossy(&output.stderr));
         return Err(RuviError::Backend(format!(
             "{} exited with {}: {}",
             bin.display(),

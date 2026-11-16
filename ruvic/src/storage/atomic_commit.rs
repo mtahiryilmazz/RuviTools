@@ -48,7 +48,8 @@ pub async fn commit_temp_output(
         Some(info)
     };
 
-    if final_output.exists() && overwrite == OverwritePolicy::Reject {
+    let dest_exists = final_output.exists() || std::fs::symlink_metadata(final_output).is_ok();
+    if dest_exists && overwrite == OverwritePolicy::Reject {
         return Err(RuviError::Filesystem(format!(
             "destination appeared before commit: {}",
             final_output.display()

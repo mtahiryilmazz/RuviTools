@@ -1,3 +1,5 @@
+pub mod youtube;
+
 use async_trait::async_trait;
 use url::Url;
 

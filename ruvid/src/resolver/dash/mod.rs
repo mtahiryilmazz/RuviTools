@@ -195,6 +195,7 @@ pub fn resolve_dash_from_xml(
         default_ext,
         streams,
         subtitles,
+        user_agent_override: None,
     })
 }
 

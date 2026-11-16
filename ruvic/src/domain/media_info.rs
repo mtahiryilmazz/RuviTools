@@ -86,12 +86,7 @@ impl HandoffManifest {
         let manifest: Self = serde_json::from_str(&content).map_err(|err| {
             RuviError::InvalidArgument(format!("invalid RUVI manifest {}: {err}", path.display()))
         })?;
-        let major = manifest
-            .schema_version
-            .split('.')
-            .next()
-            .unwrap_or_default();
-        if major != "1" {
+        if !is_supported_manifest_version(&manifest.schema_version) {
             return Err(RuviError::Unsupported(format!(
                 "unsupported manifest schema_version '{}' (expected major version '1')",
                 manifest.schema_version
@@ -104,4 +99,12 @@ impl HandoffManifest {
         }
         Ok(manifest)
     }
+}
+
+fn is_supported_manifest_version(version: &str) -> bool {
+    let mut parts = version.trim().split('.');
+    let Some(major) = parts.next() else {
+        return false;
+    };
+    major == "1" && parts.all(|part| !part.is_empty() && part.chars().all(|c| c.is_ascii_digit()))
 }

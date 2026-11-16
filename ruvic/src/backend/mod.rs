@@ -1,4 +1,5 @@
 pub mod ffmpeg;
+pub mod native;
 pub mod selector;
 
 use std::path::Path;

@@ -13,7 +13,9 @@ use crate::config::{
     AppPaths, RuvidConfig, default_config_toml, init_config, load_config, resolve_paths,
 };
 use crate::domain::download_job::{DownloadJob, PlaylistItemError, PlaylistReport};
-use crate::domain::media_manifest::redact_sensitive_url;
+use crate::domain::media_manifest::{
+    redact_media_source, redact_sensitive_url, redact_urls_in_text,
+};
 use crate::downloader::execute_download;
 use crate::downloader::scheduler::DownloadScheduler;
 use crate::error::{RuviError, RuviResult};
@@ -103,8 +105,7 @@ async fn handle_info(
     )?;
 
     let mut source = ResolverRegistry::resolve(&ctx, &args.url).await?;
-    source.url = redact_sensitive_url(&source.url);
-    source.resolved_url = redact_sensitive_url(&source.resolved_url);
+    redact_media_source(&mut source);
 
     if json_mode {
         emit_json(&source);
@@ -250,7 +251,7 @@ async fn handle_playlist(
                         errors_c.lock().await.push(PlaylistItemError {
                             index: entry.index,
                             url: redact_sensitive_url(&entry.url),
-                            error: err.to_string(),
+                            error: redact_urls_in_text(&err.to_string()),
                         });
                         Ok(())
                     } else {

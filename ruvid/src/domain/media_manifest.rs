@@ -60,8 +60,11 @@ pub struct ManifestSubtitle {
     pub format: String,
 }
 
+use crate::domain::media_source::MediaSource;
+use crate::domain::stream::StreamPayload;
+
 /// Redacts credentials and sensitive query parameters (`token`, `sig`, `key`, `auth`, `secret`, `hdnea`, `policy`, etc.)
-/// before writing URLs to manifests or logs.
+/// before writing URLs to manifests, JSON output, or logs.
 pub fn redact_sensitive_url(raw: &str) -> String {
     let Ok(mut parsed) = Url::parse(raw) else {
         return raw.to_string();
@@ -85,15 +88,20 @@ pub fn redact_sensitive_url(raw: &str) -> String {
                 "auth",
                 "secret",
                 "pass",
+                "pwd",
                 "hdnea",
                 "policy",
                 "credential",
                 "cookie",
                 "expires",
+                "session",
+                "jwt",
+                "bearer",
                 "x-amz-",
             ]
             .iter()
-            .any(|marker| lk.contains(marker));
+            .any(|marker| lk.contains(marker))
+                || lk == "sid";
             if is_sensitive {
                 (k.into_owned(), "REDACTED".to_string())
             } else {
@@ -106,6 +114,79 @@ pub fn redact_sensitive_url(raw: &str) -> String {
         parsed.query_pairs_mut().clear().extend_pairs(pairs);
     }
     parsed.to_string()
+}
+
+/// Redacts all URL credentials and sensitive query tokens inside an arbitrary text message (e.g. errors/logs).
+pub fn redact_urls_in_text(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+
+    while let Some(pos) = find_next_url_start(rest) {
+        out.push_str(&rest[..pos]);
+        let candidate_slice = &rest[pos..];
+        let end = candidate_slice
+            .find(|c: char| c.is_whitespace() || matches!(c, '"' | '\'' | '<' | '>' | ')' | ']'))
+            .unwrap_or(candidate_slice.len());
+        let raw_token = &candidate_slice[..end];
+        let trimmed = raw_token.trim_end_matches(['.', ',', ';', ':']);
+        let trailing = &raw_token[trimmed.len()..];
+        out.push_str(&redact_sensitive_url(trimmed));
+        out.push_str(trailing);
+        rest = &candidate_slice[end..];
+    }
+    out.push_str(rest);
+    out
+}
+
+fn find_next_url_start(haystack: &str) -> Option<usize> {
+    let lower = haystack.to_ascii_lowercase();
+    ["https://", "http://", "ftp://", "socks5://", "socks5h://"]
+        .iter()
+        .filter_map(|scheme| lower.find(scheme))
+        .min()
+}
+
+/// Redacts all URLs inside a [`MediaSource`] before emitting it in `info` output or logs.
+pub fn redact_media_source(source: &mut MediaSource) {
+    source.url = redact_sensitive_url(&source.url);
+    source.resolved_url = redact_sensitive_url(&source.resolved_url);
+    for stream in &mut source.streams {
+        match &mut stream.payload {
+            StreamPayload::DirectHttp { url, .. } => {
+                *url = redact_sensitive_url(url);
+            }
+            StreamPayload::Hls {
+                playlist_url,
+                init_segment_url,
+                segments,
+                ..
+            } => {
+                *playlist_url = redact_sensitive_url(playlist_url);
+                if let Some(init) = init_segment_url.as_mut() {
+                    *init = redact_sensitive_url(init);
+                }
+                for seg in segments {
+                    seg.url = redact_sensitive_url(&seg.url);
+                }
+            }
+            StreamPayload::Dash {
+                mpd_url,
+                init_segment_url,
+                segments,
+            } => {
+                *mpd_url = redact_sensitive_url(mpd_url);
+                if let Some(init) = init_segment_url.as_mut() {
+                    *init = redact_sensitive_url(init);
+                }
+                for seg in segments {
+                    seg.url = redact_sensitive_url(&seg.url);
+                }
+            }
+        }
+    }
+    for sub in &mut source.subtitles {
+        sub.url = redact_sensitive_url(&sub.url);
+    }
 }
 
 pub fn utc_now_rfc3339() -> String {

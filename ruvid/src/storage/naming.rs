@@ -3,8 +3,9 @@ use std::path::{Component, Path, PathBuf};
 use crate::error::{RuviError, RuviResult};
 
 const WINDOWS_RESERVED: &[&str] = &[
-    "CON", "PRN", "AUX", "NUL", "COM1", "COM2", "COM3", "COM4", "COM5", "COM6", "COM7", "COM8",
-    "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7", "LPT8", "LPT9",
+    "CON", "PRN", "AUX", "NUL", "CONIN$", "CONOUT$", "CLOCK$", "COM1", "COM2", "COM3", "COM4",
+    "COM5", "COM6", "COM7", "COM8", "COM9", "LPT1", "LPT2", "LPT3", "LPT4", "LPT5", "LPT6", "LPT7",
+    "LPT8", "LPT9",
 ];
 
 pub fn sanitize_filename(raw: &str) -> String {
@@ -24,6 +25,7 @@ pub fn sanitize_filename(raw: &str) -> String {
         .split('.')
         .next()
         .unwrap_or(candidate)
+        .trim()
         .to_ascii_uppercase();
     if WINDOWS_RESERVED.contains(&stem_upper.as_str()) {
         format!("_{candidate}")

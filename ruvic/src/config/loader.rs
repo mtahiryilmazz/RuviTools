@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use directories::BaseDirs;
 
 use crate::config::schema::RuvicConfig;
+use crate::domain::output_spec::HwAccelMode;
 use crate::error::{RuviError, RuviResult};
 
 #[derive(Debug, Clone)]
@@ -97,16 +98,12 @@ pub fn validate_config(cfg: &RuvicConfig) -> RuviResult<()> {
             cfg.output.color
         )));
     }
-    let hwaccel = cfg.processing.hwaccel.to_ascii_lowercase();
-    if !matches!(
-        hwaccel.as_str(),
-        "auto" | "none" | "off" | "nvenc" | "qsv" | "amf" | "videotoolbox"
-    ) {
-        return Err(RuviError::Config(format!(
+    HwAccelMode::from_name(&cfg.processing.hwaccel).map_err(|_| {
+        RuviError::Config(format!(
             "processing.hwaccel must be auto|none|nvenc|qsv|amf|videotoolbox, got '{}'",
             cfg.processing.hwaccel
-        )));
-    }
+        ))
+    })?;
     Ok(())
 }
 

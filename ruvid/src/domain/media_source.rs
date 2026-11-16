@@ -29,4 +29,6 @@ pub struct MediaSource {
     pub streams: Vec<MediaStream>,
     #[serde(default)]
     pub subtitles: Vec<SubtitleTrack>,
+    #[serde(skip)]
+    pub user_agent_override: Option<String>,
 }

@@ -58,11 +58,20 @@ impl MediaBackend for FfmpegBackend {
             })?;
 
         if !output.status.success() {
-            let stderr = sanitize_log_line(&String::from_utf8_lossy(&output.stderr));
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            let sanitized_tail: Vec<String> = stderr
+                .lines()
+                .rev()
+                .take(MAX_STDERR_LINES)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .map(sanitize_log_line)
+                .collect();
             return Err(RuviError::Backend(format!(
                 "ffprobe failed ({}): {}",
                 output.status,
-                stderr.trim()
+                sanitized_tail.join(" | ").trim()
             )));
         }
 
@@ -128,6 +137,9 @@ impl MediaBackend for FfmpegBackend {
 
         let sleep_deadline = tokio::time::sleep(self.timeout);
         tokio::pin!(sleep_deadline);
+        let ctrl_c = tokio::signal::ctrl_c();
+        tokio::pin!(ctrl_c);
+        let mut ctrl_c_armed = true;
         let mut prog_closed = false;
 
         // Drive child wait + live progress updates under timeout + cancellation + ctrl-c
@@ -145,6 +157,10 @@ impl MediaBackend for FfmpegBackend {
                 () = &mut sleep_deadline => {
                     let _ = child.kill().await;
                     let _ = child.wait().await;
+                    stdout_task.abort();
+                    stderr_task.abort();
+                    let _ = stdout_task.await;
+                    let _ = stderr_task.await;
                     return Err(RuviError::Backend(format!(
                         "ffmpeg exceeded timeout of {}s",
                         self.timeout.as_secs()
@@ -153,12 +169,21 @@ impl MediaBackend for FfmpegBackend {
                 () = cancel.cancelled() => {
                     let _ = child.kill().await;
                     let _ = child.wait().await;
+                    stdout_task.abort();
+                    stderr_task.abort();
+                    let _ = stdout_task.await;
+                    let _ = stderr_task.await;
                     return Err(RuviError::Cancelled("ffmpeg operation cancelled".to_string()));
                 }
-                ctrl = tokio::signal::ctrl_c() => {
+                ctrl = &mut ctrl_c, if ctrl_c_armed => {
+                    ctrl_c_armed = false;
                     if ctrl.is_ok() {
                         let _ = child.kill().await;
                         let _ = child.wait().await;
+                        stdout_task.abort();
+                        stderr_task.abort();
+                        let _ = stdout_task.await;
+                        let _ = stderr_task.await;
                         return Err(RuviError::Cancelled("interrupted by Ctrl-C".to_string()));
                     }
                 }
@@ -197,15 +222,152 @@ impl MediaBackend for FfmpegBackend {
     }
 }
 
+/// Redacts URL userinfo, auth headers, and sensitive query parameters from backend logs.
 pub fn sanitize_log_line(line: &str) -> String {
-    let mut out = line.to_string();
-    for secret_key in ["token=", "sig=", "key=", "auth=", "password="] {
-        if let Some(idx) = out.to_ascii_lowercase().find(secret_key) {
-            let prefix = &out[..idx + secret_key.len()];
-            let rest = &out[idx + secret_key.len()..];
-            let end = rest.find(['&', ' ', '"', '\'']).unwrap_or(rest.len());
-            out = format!("{prefix}[REDACTED]{}", &rest[end..]);
+    let step1 = redact_url_userinfo(line);
+    let step2 = redact_auth_schemes(&step1);
+    redact_key_value_secrets(&step2)
+}
+
+fn redact_url_userinfo(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut pos = 0;
+    while let Some(rel) = input[pos..].find("://") {
+        let scheme_end = pos + rel + 3;
+        let auth_end_rel = input[scheme_end..]
+            .find([
+                '/', '?', '#', ' ', '\t', '\r', '\n', '"', '\'', ')', ']', '}', ',', ';', '<', '>',
+            ])
+            .unwrap_or(input.len() - scheme_end);
+        let authority = &input[scheme_end..scheme_end + auth_end_rel];
+        if let Some(at_rel) = authority.rfind('@') {
+            out.push_str(&input[pos..scheme_end]);
+            out.push_str("[REDACTED]@");
+            pos = scheme_end + at_rel + 1;
+        } else {
+            out.push_str(&input[pos..scheme_end]);
+            pos = scheme_end;
         }
     }
+    out.push_str(&input[pos..]);
     out
+}
+
+fn redact_auth_schemes(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut i = 0;
+    let mut last_copied = 0;
+    let bytes = input.as_bytes();
+
+    while i < bytes.len() {
+        let matched = ["bearer ", "basic "].into_iter().find(|scheme| {
+            input[i..]
+                .get(..scheme.len())
+                .is_some_and(|prefix| prefix.eq_ignore_ascii_case(scheme))
+        });
+        if let Some(scheme) = matched
+            && (i == 0 || !bytes[i - 1].is_ascii_alphanumeric())
+        {
+            let mut val_start = i + scheme.len();
+            while val_start < bytes.len() && matches!(bytes[val_start], b' ' | b'\t') {
+                val_start += 1;
+            }
+            let val_end_rel = input[val_start..]
+                .find([
+                    ' ', '\t', '\r', '\n', '"', '\'', '&', ')', ']', '}', ',', ';', '<', '>',
+                ])
+                .unwrap_or(input.len() - val_start);
+            if val_end_rel > 0 {
+                out.push_str(&input[last_copied..val_start]);
+                out.push_str("[REDACTED]");
+                i = val_start + val_end_rel;
+                last_copied = i;
+                continue;
+            }
+        }
+        let ch_len = input[i..].chars().next().map_or(1, char::len_utf8);
+        i += ch_len;
+    }
+
+    out.push_str(&input[last_copied..]);
+    out
+}
+
+fn redact_key_value_secrets(input: &str) -> String {
+    let mut out = String::with_capacity(input.len());
+    let mut last_copied = 0;
+    let bytes = input.as_bytes();
+
+    for (eq_idx, _) in input.match_indices('=') {
+        if eq_idx < last_copied {
+            continue;
+        }
+        let mut key_start = eq_idx;
+        while key_start > last_copied {
+            let b = bytes[key_start - 1];
+            if b.is_ascii_alphanumeric() || b == b'_' || b == b'-' {
+                key_start -= 1;
+            } else {
+                break;
+            }
+        }
+        let key = &input[key_start..eq_idx];
+        if !is_sensitive_param_key(key) {
+            continue;
+        }
+        let val_start = eq_idx + 1;
+        let val_end_rel = input[val_start..]
+            .find([
+                '&', '#', ' ', '\t', '\r', '\n', '"', '\'', ')', ']', '}', ',', ';', '<', '>',
+            ])
+            .unwrap_or(input.len() - val_start);
+        out.push_str(&input[last_copied..val_start]);
+        out.push_str("[REDACTED]");
+        last_copied = val_start + val_end_rel;
+    }
+
+    out.push_str(&input[last_copied..]);
+    out
+}
+
+fn is_sensitive_param_key(key: &str) -> bool {
+    let k = key.to_ascii_lowercase();
+    k == "token"
+        || k.ends_with("_token")
+        || k.ends_with("-token")
+        || k == "authtoken"
+        || k == "sig"
+        || k == "signature"
+        || k.ends_with("_sig")
+        || k.ends_with("-sig")
+        || k.ends_with("_signature")
+        || k.ends_with("-signature")
+        || k == "key"
+        || k == "apikey"
+        || k.ends_with("_key")
+        || k.ends_with("-key")
+        || k == "auth"
+        || k == "authorization"
+        || k.ends_with("_auth")
+        || k.ends_with("-auth")
+        || k == "password"
+        || k == "passwd"
+        || k == "pwd"
+        || k.ends_with("_password")
+        || k.ends_with("-password")
+        || k.ends_with("_passwd")
+        || k.ends_with("-passwd")
+        || k.ends_with("_pass")
+        || k.ends_with("-pass")
+        || k == "secret"
+        || k.ends_with("_secret")
+        || k.ends_with("-secret")
+        || k == "hdnea"
+        || k == "policy"
+        || k == "credential"
+        || k == "x-amz-credential"
+        || k == "cookie"
+        || k == "session"
+        || k == "session_id"
+        || k == "jwt"
 }

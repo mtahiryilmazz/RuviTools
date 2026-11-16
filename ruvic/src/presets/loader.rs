@@ -3,6 +3,9 @@ use std::path::Path;
 use crate::domain::preset::Preset;
 use crate::domain::stream::{AudioCodec, ContainerFormat, VideoCodec};
 use crate::error::{RuviError, RuviResult};
+use crate::planner::validation::{
+    is_allowed_speed_preset, is_valid_bitrate, is_valid_pixel_format, validate_quality,
+};
 use crate::presets::builtin::find_builtin_preset;
 
 pub fn load_preset_from_path(path: &Path) -> RuviResult<Preset> {
@@ -22,15 +25,19 @@ pub fn find_preset(name_or_path: &str, user_presets_dir: Option<&Path>) -> RuviR
         return Ok(builtin);
     }
 
-    if let Some(dir) = user_presets_dir {
+    let is_plain_name = !name_or_path.is_empty()
+        && name_or_path != "."
+        && name_or_path != ".."
+        && !name_or_path.contains(['/', '\\']);
+    if is_plain_name && let Some(dir) = user_presets_dir {
         let candidate = dir.join(format!("{name_or_path}.toml"));
-        if candidate.exists() {
+        if candidate.is_file() {
             return load_preset_from_path(&candidate);
         }
     }
 
     let as_path = Path::new(name_or_path);
-    if as_path.exists() {
+    if as_path.is_file() {
         return load_preset_from_path(as_path);
     }
 
@@ -61,11 +68,25 @@ pub fn validate_preset(preset: &Preset) -> RuviResult<()> {
                 preset.name, speed
             )));
         }
-        if let Some(q) = video.quality
-            && q > 63
+        if let Some(q) = video.quality {
+            validate_quality(q, Some(vcodec)).map_err(|_| {
+                RuviError::InvalidArgument(format!(
+                    "preset '{}': quality {q} out of allowed range",
+                    preset.name
+                ))
+            })?;
+        }
+        if let Some(ref pix_fmt) = video.pixel_format
+            && !is_valid_pixel_format(pix_fmt)
         {
             return Err(RuviError::InvalidArgument(format!(
-                "preset '{}': quality {q} out of allowed range (0..=63)",
+                "preset '{}': invalid pixel format '{pix_fmt}'",
+                preset.name
+            )));
+        }
+        if video.max_height == Some(0) {
+            return Err(RuviError::InvalidArgument(format!(
+                "preset '{}': max_height must be greater than 0",
                 preset.name
             )));
         }
@@ -97,28 +118,4 @@ pub fn validate_preset(preset: &Preset) -> RuviResult<()> {
     }
 
     Ok(())
-}
-
-fn is_allowed_speed_preset(speed: &str) -> bool {
-    matches!(
-        speed.to_ascii_lowercase().as_str(),
-        "ultrafast"
-            | "superfast"
-            | "veryfast"
-            | "faster"
-            | "fast"
-            | "medium"
-            | "slow"
-            | "slower"
-            | "veryslow"
-    )
-}
-
-fn is_valid_bitrate(rate: &str) -> bool {
-    let trimmed = rate.trim();
-    if trimmed.is_empty() {
-        return false;
-    }
-    let digits = trimmed.trim_end_matches(['k', 'K', 'm', 'M']);
-    !digits.is_empty() && digits.chars().all(|c| c.is_ascii_digit())
 }

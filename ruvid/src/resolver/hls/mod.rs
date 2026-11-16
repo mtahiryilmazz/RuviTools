@@ -43,6 +43,7 @@ pub async fn resolve_hls(
             default_ext: stream.container.clone(),
             streams: vec![stream],
             subtitles: Vec::new(),
+            user_agent_override: None,
         })
     }
 }

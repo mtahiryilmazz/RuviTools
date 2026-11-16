@@ -3,6 +3,7 @@ use std::time::Duration;
 use reqwest::StatusCode;
 use tokio_util::sync::CancellationToken;
 
+use crate::domain::media_manifest::{redact_sensitive_url, redact_urls_in_text};
 use crate::error::{RuviError, RuviResult};
 
 pub fn is_transient_status(status: StatusCode) -> bool {
@@ -66,17 +67,46 @@ pub enum RetryableError {
     Permanent(RuviError),
 }
 
+pub fn map_reqwest_error(err: reqwest::Error) -> RuviError {
+    let is_redirect = err.is_redirect();
+    let msg = format_reqwest_error(err);
+    if is_redirect {
+        RuviError::Unsupported(msg)
+    } else {
+        RuviError::Network(msg)
+    }
+}
+
+fn format_reqwest_error(err: reqwest::Error) -> String {
+    let redacted_url = err.url().map(|u| redact_sensitive_url(u.as_str()));
+    let without = err.without_url();
+    let base = redact_urls_in_text(&without.to_string());
+    match redacted_url {
+        Some(u) => format!("{base} ({u})"),
+        None => base,
+    }
+}
+
 impl RetryableError {
     pub fn from_reqwest(err: reqwest::Error) -> Self {
-        if err.is_timeout() || err.is_connect() || err.is_request() {
-            Self::Transient(RuviError::Network(err.to_string()))
+        if err.is_redirect() {
+            return Self::Permanent(RuviError::Unsupported(format_reqwest_error(err)));
+        }
+        let transient = err.is_timeout() || err.is_connect() || err.is_request();
+        let ruvi_err = RuviError::Network(format_reqwest_error(err));
+        if transient {
+            Self::Transient(ruvi_err)
         } else {
-            Self::Permanent(RuviError::Network(err.to_string()))
+            Self::Permanent(ruvi_err)
         }
     }
 
     pub fn from_status(status: StatusCode, url: &str) -> Self {
-        let err = RuviError::Network(format!("HTTP {} for {}", status.as_u16(), url));
+        let err = RuviError::Network(format!(
+            "HTTP {} for {}",
+            status.as_u16(),
+            redact_sensitive_url(url)
+        ));
         if is_transient_status(status) {
             Self::Transient(err)
         } else {

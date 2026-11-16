@@ -103,6 +103,11 @@ pub fn validate_config(cfg: &RuvidConfig) -> RuviResult<()> {
             cfg.output.color
         )));
     }
+    if let Err(err) = crate::downloader::throttle::parse_rate_limit(&cfg.network.limit_rate) {
+        return Err(RuviError::Config(format!(
+            "invalid network.limit_rate: {err}"
+        )));
+    }
     Ok(())
 }
 

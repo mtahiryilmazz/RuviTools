@@ -121,5 +121,6 @@ pub fn parse_master_playlist(
         default_ext: "ts".to_string(),
         streams,
         subtitles,
+        user_agent_override: None,
     })
 }

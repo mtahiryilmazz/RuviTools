@@ -69,10 +69,10 @@ codec = "vp9"
 }
 
 #[test]
-fn doctor_reports_missing_and_present_ffmpeg() {
+fn doctor_reports_native_engine_and_optional_ffmpeg_override() {
     let tmp = tempfile::tempdir().unwrap();
 
-    // Force PATH to empty dir so system ffmpeg isn't accidentally matched
+    // Even with an empty PATH and no external ffmpeg, built-in native Rust engine is ready
     common::ruvic_cmd(tmp.path())
         .env("PATH", tmp.path())
         .env_remove("RUVIC_FFMPEG_PATH")
@@ -80,7 +80,9 @@ fn doctor_reports_missing_and_present_ffmpeg() {
         .args(["doctor", "--json"])
         .assert()
         .success()
-        .stdout(predicate::str::contains(r#""ok": false"#));
+        .stdout(predicate::str::contains(r#""ok": true"#))
+        .stdout(predicate::str::contains(r#""engine": "native-rust""#))
+        .stdout(predicate::str::contains(r#""ffmpeg_found": false"#));
 
     let pair = common::make_fake_ffmpeg_pair();
     common::ruvic_cmd(tmp.path())
@@ -90,5 +92,6 @@ fn doctor_reports_missing_and_present_ffmpeg() {
         .assert()
         .success()
         .stdout(predicate::str::contains(r#""ok": true"#))
+        .stdout(predicate::str::contains(r#""engine": "ffmpeg-subprocess""#))
         .stdout(predicate::str::contains("7.1-ruvic-fake"));
 }

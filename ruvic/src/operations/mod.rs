@@ -10,7 +10,7 @@ use tokio_util::sync::CancellationToken;
 use crate::backend::MediaBackend;
 use crate::domain::conversion_job::{ConversionJob, OperationResult};
 use crate::error::RuviResult;
-use crate::planner::plan_conversion;
+use crate::planner::{plan_conversion, validate_io_paths};
 use crate::probe::ProbeService;
 use crate::storage::{
     TempOutputGuard, commit_temp_output, create_temp_output_path, ensure_output_parent,
@@ -22,6 +22,8 @@ pub async fn run_job_pipeline(
     job: ConversionJob,
     show_progress: bool,
 ) -> RuviResult<OperationResult> {
+    validate_io_paths(&job.input, &job.output, job.overwrite)?;
+
     let probe_svc = ProbeService::new(backend);
     let source_info = probe_svc.probe_file(&job.input).await?;
     let caps = backend.capabilities().await?;
@@ -29,15 +31,7 @@ pub async fn run_job_pipeline(
     let temp_path = create_temp_output_path(&job.output)?;
     let plan = plan_conversion(job, &source_info, &caps, temp_path.clone())?;
 
-    ensure_output_parent(
-        &plan.final_output,
-        if plan.operation == crate::domain::conversion_job::OperationKind::Remux {
-            // planner already checked overwrite; ensure parent directory exists
-            crate::domain::output_spec::OverwritePolicy::Overwrite
-        } else {
-            crate::domain::output_spec::OverwritePolicy::Overwrite
-        },
-    )?;
+    ensure_output_parent(&plan.final_output, plan.overwrite)?;
 
     let mut guard = TempOutputGuard::new(temp_path);
     let label = format!("{:?}", plan.operation).to_lowercase();
@@ -51,13 +45,12 @@ pub async fn run_job_pipeline(
         .await?;
     sink.finish();
 
-    let overwrite_policy = crate::domain::output_spec::OverwritePolicy::Overwrite;
     let (output_size_bytes, output_probe) = commit_temp_output(
         backend,
         &mut guard,
         &plan.final_output,
         plan.container,
-        overwrite_policy,
+        plan.overwrite,
     )
     .await?;
 

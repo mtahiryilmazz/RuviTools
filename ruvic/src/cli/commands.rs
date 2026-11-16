@@ -26,6 +26,8 @@ use crate::probe::ProbeService;
 #[derive(Debug, Serialize)]
 struct DoctorReport {
     ok: bool,
+    engine: String,
+    native_ready: bool,
     version: &'static str,
     config_path: String,
     config_exists: bool,
@@ -368,6 +370,7 @@ async fn handle_doctor(
     overrides: &BackendOverrides,
     json_mode: bool,
 ) -> RuviResult<()> {
+    let explicit_ffmpeg = overrides.has_explicit_ffmpeg(config);
     let discovered = try_locate_ffmpeg(
         overrides.ffmpeg.as_deref(),
         overrides.ffprobe.as_deref(),
@@ -390,13 +393,25 @@ async fn handle_doctor(
             (None, None, 0, Vec::new())
         };
 
-    let ok = discovered.ffmpeg.is_some()
-        && discovered.ffprobe.is_some()
-        && ffmpeg_version.is_some()
-        && ffprobe_version.is_some();
+    let engine = if explicit_ffmpeg {
+        "ffmpeg-subprocess".to_string()
+    } else {
+        "native-rust".to_string()
+    };
+
+    let ok = if explicit_ffmpeg {
+        discovered.ffmpeg.is_some()
+            && discovered.ffprobe.is_some()
+            && ffmpeg_version.is_some()
+            && ffprobe_version.is_some()
+    } else {
+        encoders_count > 0
+    };
 
     let report = DoctorReport {
         ok,
+        engine,
+        native_ready: true,
         version: env!("CARGO_PKG_VERSION"),
         config_path: paths.config_file.to_string_lossy().into_owned(),
         config_exists: paths.config_file.exists(),
@@ -413,22 +428,28 @@ async fn handle_doctor(
     if json_mode {
         emit_json(&report);
     } else {
-        println!("ruvic version: {}", report.version);
+        println!(
+            "ruvic version: {} (engine={})",
+            report.version, report.engine
+        );
         println!(
             "config: {} (exists={})",
             report.config_path, report.config_exists
         );
+        let backend_label = if explicit_ffmpeg {
+            report
+                .ffmpeg_path
+                .as_deref()
+                .unwrap_or("ffmpeg override (not found)")
+        } else {
+            "built-in pure-Rust engine"
+        };
         println!(
-            "ffmpeg: {} ({})",
-            report.ffmpeg_path.as_deref().unwrap_or("NOT FOUND"),
+            "backend: {} ({})",
+            backend_label,
             report.ffmpeg_version.as_deref().unwrap_or("unavailable")
         );
-        println!(
-            "ffprobe: {} ({})",
-            report.ffprobe_path.as_deref().unwrap_or("NOT FOUND"),
-            report.ffprobe_version.as_deref().unwrap_or("unavailable")
-        );
-        println!("encoders detected: {}", report.encoders_count);
+        println!("encoders available: {}", report.encoders_count);
         println!(
             "hwaccels: {}",
             if report.hwaccels.is_empty() {

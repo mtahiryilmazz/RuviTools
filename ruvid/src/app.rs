@@ -62,7 +62,8 @@ pub async fn run() -> ExitCode {
             if emit_json_errors {
                 emit_json(&err.to_envelope());
             } else {
-                eprintln!("error: {err}");
+                let msg = crate::domain::media_manifest::redact_urls_in_text(&err.to_string());
+                eprintln!("error: {msg}");
             }
             err.exit_code()
         }
