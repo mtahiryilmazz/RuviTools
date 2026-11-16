@@ -1,6 +1,15 @@
 {
 	"folders": [
 		{
+			"name": "ruvid",
+			"path": "ruvid"
+		},
+		{
+			"name": "ruvic",
+			"path": "ruvic"
+		},
+		{
+			"name": "root",
 			"path": "."
 		}
 	],

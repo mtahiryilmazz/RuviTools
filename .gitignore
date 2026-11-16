@@ -1,12 +1,12 @@
 # Rust / Cargo
-/target/
+target/
 **/*.rs.bk
 *.pdb
 
 # Build & ara çıktılar
-/build/
-/dist/
-/out/
+build/
+dist/
+out/
 *.tmp
 *.log
 
@@ -19,6 +19,8 @@
 *.ts
 *.m3u8
 !fixtures/**/*.json
+!ruvid/tests/fixtures/**
+!ruvic/tests/fixtures/**
 
 # Editör / OS
 .vscode/

@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<MPD xmlns="urn:mpeg:dash:schema:mpd:2011" type="static" mediaPresentationDuration="PT8S" profiles="urn:mpeg:dash:profile:isoff-live:2011">
+  <Period id="0" duration="PT8S">
+    <AdaptationSet mimeType="video/mp4" contentType="video">
+      <Representation id="v720" bandwidth="1500000" width="1280" height="720" codecs="avc1.4d401f">
+        <SegmentTemplate initialization="/dash/$RepresentationID$/init.mp4" media="/dash/$RepresentationID$/seg-$Number%03d$.m4s" startNumber="1" timescale="1" duration="4"/>
+      </Representation>
+      <Representation id="v480" bandwidth="750000" width="854" height="480" codecs="avc1.4d401e">
+        <SegmentTemplate initialization="/dash/$RepresentationID$/init.mp4" media="/dash/$RepresentationID$/seg-$Number%03d$.m4s" startNumber="1" timescale="1" duration="4"/>
+      </Representation>
+    </AdaptationSet>
+  </Period>
+</MPD>
