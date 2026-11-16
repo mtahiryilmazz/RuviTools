@@ -22,6 +22,14 @@ pub struct DownloadJob {
     pub to_stdout: bool,
     pub subtitles: bool,
     pub subtitles_lang: Option<String>,
+    pub sub_format: String,
+    pub auto_subs: bool,
+    pub audio_lang: Option<String>,
+    pub split_chapters: bool,
+    pub clip: Option<String>,
+    pub start_time: Option<String>,
+    pub end_time: Option<String>,
+    pub duration_seconds: Option<f64>,
     pub allow_private_net: bool,
 }
 
@@ -61,6 +69,8 @@ pub struct DownloadOutcome {
     pub manifest_path: Option<String>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subtitles: Vec<SubtitleDownload>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub chapters: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

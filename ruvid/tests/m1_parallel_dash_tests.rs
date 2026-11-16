@@ -412,6 +412,7 @@ fn dual_stream_handoff_manifest_structure() {
         default_ext: "mp4".to_string(),
         streams: Vec::new(),
         subtitles: Vec::new(),
+        chapters: Vec::new(),
         user_agent_override: None,
     };
 

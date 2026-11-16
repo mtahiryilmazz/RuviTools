@@ -2,10 +2,36 @@ use crate::domain::stream::{MediaStream, StreamKind};
 use crate::error::{RuviError, RuviResult};
 
 pub fn select_stream<'a>(streams: &'a [MediaStream], spec: &str) -> RuviResult<&'a MediaStream> {
+    select_stream_with_lang(streams, spec, None)
+}
+
+pub fn select_stream_with_lang<'a>(
+    streams: &'a [MediaStream],
+    spec: &str,
+    audio_lang: Option<&str>,
+) -> RuviResult<&'a MediaStream> {
     if streams.is_empty() {
         return Err(RuviError::Unsupported(
             "no downloadable streams found in media source".to_string(),
         ));
+    }
+
+    if let Some(lang) = audio_lang {
+        let lang_audio: Vec<&MediaStream> = streams
+            .iter()
+            .filter(|s| {
+                (s.kind == StreamKind::Audio || s.kind == StreamKind::VideoAudio)
+                    && s.language
+                        .as_deref()
+                        .is_some_and(|l| l.eq_ignore_ascii_case(lang) || l.starts_with(lang))
+            })
+            .collect();
+        if !lang_audio.is_empty() {
+            return lang_audio
+                .into_iter()
+                .max_by_key(|s| s.bandwidth_bps.unwrap_or(0))
+                .ok_or_else(|| RuviError::Unsupported("no stream available".to_string()));
+        }
     }
 
     // For automatic selection (`best` / `worst`), prefer muxed VideoAudio streams when available
@@ -89,6 +115,14 @@ pub fn select_stream_pair<'a>(
     streams: &'a [MediaStream],
     spec: &str,
 ) -> Option<(&'a MediaStream, &'a MediaStream)> {
+    select_stream_pair_with_lang(streams, spec, None)
+}
+
+pub fn select_stream_pair_with_lang<'a>(
+    streams: &'a [MediaStream],
+    spec: &str,
+    audio_lang: Option<&str>,
+) -> Option<(&'a MediaStream, &'a MediaStream)> {
     if streams.is_empty() {
         return None;
     }
@@ -101,7 +135,7 @@ pub fn select_stream_pair<'a>(
             return None;
         }
         if exact.kind == StreamKind::Video {
-            let audio = find_best_audio(streams, exact)?;
+            let audio = find_best_audio_with_lang(streams, exact, audio_lang)?;
             return Some((exact, audio));
         }
         return None;
@@ -191,19 +225,44 @@ pub fn select_stream_pair<'a>(
         return None;
     }
 
-    let best_audio = find_best_audio(streams, selected_video)?;
+    let best_audio = find_best_audio_with_lang(streams, selected_video, audio_lang)?;
     Some((selected_video, best_audio))
 }
 
-fn find_best_audio<'a>(streams: &'a [MediaStream], video: &MediaStream) -> Option<&'a MediaStream> {
-    let audio_pool: Vec<&MediaStream> = streams
+fn find_best_audio_with_lang<'a>(
+    streams: &'a [MediaStream],
+    video: &MediaStream,
+    audio_lang: Option<&str>,
+) -> Option<&'a MediaStream> {
+    let all_audio: Vec<&MediaStream> = streams
         .iter()
         .filter(|s| s.kind == StreamKind::Audio)
         .collect();
 
-    if audio_pool.is_empty() {
+    if all_audio.is_empty() {
         return None;
     }
+
+    let lang_filtered: Vec<&MediaStream> = if let Some(lang) = audio_lang {
+        let matched: Vec<&MediaStream> = all_audio
+            .iter()
+            .copied()
+            .filter(|a| {
+                a.language
+                    .as_deref()
+                    .is_some_and(|l| l.eq_ignore_ascii_case(lang) || l.starts_with(lang))
+            })
+            .collect();
+        if matched.is_empty() {
+            all_audio
+        } else {
+            matched
+        }
+    } else {
+        all_audio
+    };
+
+    let audio_pool = lang_filtered;
 
     let is_webm = video.container.eq_ignore_ascii_case("webm");
     let compatible_audio = audio_pool

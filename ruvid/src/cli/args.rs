@@ -43,6 +43,7 @@ pub struct Cli {
 }
 
 #[derive(Debug, Subcommand)]
+#[allow(clippy::large_enum_variant)]
 pub enum Commands {
     /// Resolve and download media from a URL
     Get(GetArgs),
@@ -125,6 +126,38 @@ pub struct GetArgs {
     /// Preferred subtitle language code (e.g. en, tr)
     #[arg(long, value_name = "LANG")]
     pub subtitles_lang: Option<String>,
+
+    /// Subtitle output format (vtt, srt, sbv)
+    #[arg(long, value_name = "FORMAT", default_value = "vtt")]
+    pub sub_format: String,
+
+    /// Include auto-generated (ASR) subtitle tracks
+    #[arg(long)]
+    pub auto_subs: bool,
+
+    /// Preferred audio language code for multi-language dubbed tracks (e.g. en, tr)
+    #[arg(long, value_name = "LANG")]
+    pub audio_lang: Option<String>,
+
+    /// Split downloaded video into separate files per chapter
+    #[arg(long)]
+    pub split_chapters: bool,
+
+    /// Download/trim a specific time range clip (e.g. "10-25" or "00:00:10-00:00:25")
+    #[arg(long, value_name = "RANGE")]
+    pub clip: Option<String>,
+
+    /// Clip start timestamp (seconds, MM:SS, or HH:MM:SS)
+    #[arg(long, value_name = "TIME")]
+    pub start_time: Option<String>,
+
+    /// Clip end timestamp (seconds, MM:SS, or HH:MM:SS)
+    #[arg(long, value_name = "TIME")]
+    pub end_time: Option<String>,
+
+    /// Clip duration in seconds
+    #[arg(long, value_name = "SECONDS")]
+    pub duration: Option<f64>,
 }
 
 #[derive(Debug, Args)]

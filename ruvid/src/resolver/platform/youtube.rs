@@ -1,7 +1,7 @@
 use serde_json::{Value, json};
 use url::Url;
 
-use crate::domain::media_source::{MediaSource, SourceKind, SubtitleTrack};
+use crate::domain::media_source::{Chapter, MediaSource, SourceKind, SubtitleTrack};
 use crate::domain::stream::{MediaStream, StreamKind, StreamPayload};
 use crate::error::{RuviError, RuviResult};
 use crate::resolver::ResolveContext;
@@ -348,7 +348,15 @@ pub fn parse_player_response_json(
         .and_then(Value::as_array)
     {
         for fmt in adaptive {
-            if let Some(stream) = parse_player_format(fmt, base_url, false, streams.len()) {
+            if let Some(mut stream) = parse_player_format(fmt, base_url, false, streams.len()) {
+                // Disambiguate if another stream already shares the same itag ID (e.g. multi-language audio dubs)
+                if streams.iter().any(|s| s.id == stream.id) {
+                    if let Some(ref lang) = stream.language {
+                        stream.id = format!("{}-{lang}", stream.id);
+                    } else {
+                        stream.id = format!("{}-{}", stream.id, streams.len());
+                    }
+                }
                 streams.push(stream);
             }
         }
@@ -408,17 +416,29 @@ pub fn parse_player_response_json(
                     .to_string();
                 let name = cap
                     .pointer("/name/simpleText")
+                    .or_else(|| cap.pointer("/name/runs/0/text"))
                     .and_then(Value::as_str)
                     .map(ToString::to_string);
+                let is_auto = cap
+                    .get("kind")
+                    .and_then(Value::as_str)
+                    .is_some_and(|k| k.eq_ignore_ascii_case("asr"))
+                    || cap
+                        .get("vssId")
+                        .and_then(Value::as_str)
+                        .is_some_and(|v| v.starts_with("a."));
                 subtitles.push(SubtitleTrack {
                     language: lang,
                     name,
                     url: joined,
                     format: "vtt".to_string(),
+                    is_auto,
                 });
             }
         }
     }
+
+    let chapters = parse_youtube_chapters(root);
 
     let default_ext = streams
         .iter()
@@ -435,6 +455,7 @@ pub fn parse_player_response_json(
         default_ext,
         streams,
         subtitles,
+        chapters,
         user_agent_override: client_ua.map(ToString::to_string),
     }))
 }
@@ -517,7 +538,7 @@ fn parse_player_format(
             .get("fps")
             .and_then(Value::as_u64)
             .map(|f| f.to_string()),
-        language: None,
+        language: extract_audio_language(fmt),
         payload: StreamPayload::DirectHttp {
             url: joined,
             total_bytes,
@@ -565,4 +586,367 @@ pub fn extract_balanced_json_from_slice(slice: &str) -> Option<String> {
         }
     }
     None
+}
+
+fn extract_audio_language(fmt: &Value) -> Option<String> {
+    if let Some(id) = fmt.pointer("/audioTrack/id").and_then(Value::as_str) {
+        let lang = id.split('.').next().unwrap_or(id).trim();
+        if !lang.is_empty() {
+            return Some(lang.to_string());
+        }
+    }
+    if let Some(code) = fmt.get("languageCode").and_then(Value::as_str) {
+        let lang = code.trim();
+        if !lang.is_empty() {
+            return Some(lang.to_string());
+        }
+    }
+    if let Some(display) = fmt
+        .pointer("/audioTrack/displayName")
+        .and_then(Value::as_str)
+    {
+        let lang = display.split_whitespace().next().unwrap_or(display).trim();
+        if !lang.is_empty() {
+            return Some(lang.to_ascii_lowercase());
+        }
+    }
+    None
+}
+
+pub fn parse_youtube_chapters(root: &Value) -> Vec<Chapter> {
+    let total_dur = root
+        .pointer("/videoDetails/lengthSeconds")
+        .and_then(|v| {
+            v.as_f64()
+                .or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()))
+        })
+        .unwrap_or(0.0);
+
+    let mut raw: Vec<(String, f64)> = Vec::new();
+
+    // 1. Check markersMap (top-level or nested under playerOverlays)
+    let marker_arrays = [
+        root.get("markersMap").and_then(Value::as_array),
+        root.pointer(
+            "/playerOverlays/playerOverlayRenderer/decoratedPlayerBarRenderer/decoratedPlayerBarRenderer/playerBar/multiMarkersPlayerBarRenderer/markersMap",
+        )
+        .and_then(Value::as_array),
+    ];
+
+    for arr in marker_arrays.into_iter().flatten() {
+        for entry in arr {
+            let key = entry.get("key").and_then(Value::as_str).unwrap_or("");
+            if !matches!(
+                key,
+                "DESCRIPTION_CHAPTERS" | "AUTO_CHAPTERS" | "MACRO_MARKERS"
+            ) && !key.is_empty()
+            {
+                continue;
+            }
+            if let Some(chaps) = entry.pointer("/value/chapters").and_then(Value::as_array) {
+                for ch in chaps {
+                    let renderer = ch.get("chapterRenderer").unwrap_or(ch);
+                    let title = renderer
+                        .pointer("/title/simpleText")
+                        .or_else(|| renderer.pointer("/title/runs/0/text"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("Chapter")
+                        .trim()
+                        .to_string();
+                    let start_ms = renderer
+                        .get("timeRangeStartMillis")
+                        .and_then(|v| {
+                            v.as_f64()
+                                .or_else(|| v.as_str().and_then(|s| s.parse::<f64>().ok()))
+                        })
+                        .unwrap_or(0.0);
+                    let start_s = (start_ms / 1000.0).max(0.0);
+                    if total_dur <= 0.0 || start_s < total_dur {
+                        raw.push((title, start_s));
+                    }
+                }
+            }
+            if !raw.is_empty() {
+                break;
+            }
+        }
+        if !raw.is_empty() {
+            break;
+        }
+    }
+
+    // 2. Fallback: parse timestamp lines from shortDescription
+    if raw.is_empty()
+        && let Some(desc) = root
+            .pointer("/videoDetails/shortDescription")
+            .and_then(Value::as_str)
+    {
+        for line in desc.lines() {
+            if let Some((ts_s, title)) = parse_description_chapter_line(line)
+                && (total_dur <= 0.0 || ts_s < total_dur)
+            {
+                raw.push((title, ts_s));
+            }
+        }
+    }
+
+    if raw.is_empty() {
+        return Vec::new();
+    }
+
+    raw.sort_by(|a, b| a.1.partial_cmp(&b.1).unwrap_or(std::cmp::Ordering::Equal));
+    raw.dedup_by(|a, b| (a.1 - b.1).abs() < 0.001);
+
+    let mut chapters = Vec::with_capacity(raw.len());
+    for i in 0..raw.len() {
+        let (ref title, start_s) = raw[i];
+        let end_s = if i + 1 < raw.len() {
+            raw[i + 1].1.max(start_s)
+        } else if total_dur > start_s {
+            total_dur
+        } else {
+            start_s + 60.0
+        };
+        chapters.push(Chapter {
+            title: title.clone(),
+            start_seconds: start_s,
+            end_seconds: end_s,
+        });
+    }
+    chapters
+}
+
+fn parse_description_chapter_line(line: &str) -> Option<(f64, String)> {
+    let trimmed = line.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut parts = trimmed.splitn(2, char::is_whitespace);
+    let first = parts.next()?.trim_matches(['(', ')', '[', ']', '-']);
+    let rest = parts
+        .next()?
+        .trim_start_matches(['-', '–', '—', ':', ' '])
+        .trim();
+    if rest.is_empty() || !first.contains(':') {
+        return None;
+    }
+    let secs = parse_timestamp_seconds(first)?;
+    Some((secs, rest.to_string()))
+}
+
+pub fn parse_timestamp_seconds(input: &str) -> Option<f64> {
+    let s = input.trim();
+    if s.is_empty() {
+        return None;
+    }
+    let parts: Vec<&str> = s.split(':').collect();
+    let total = match parts.len() {
+        1 => parts[0].parse::<f64>().ok()?,
+        2 => {
+            let m = parts[0].parse::<f64>().ok()?;
+            let sec = parts[1].parse::<f64>().ok()?;
+            m * 60.0 + sec
+        }
+        3 => {
+            let h = parts[0].parse::<f64>().ok()?;
+            let m = parts[1].parse::<f64>().ok()?;
+            let sec = parts[2].parse::<f64>().ok()?;
+            h * 3600.0 + m * 60.0 + sec
+        }
+        _ => return None,
+    };
+    if total.is_finite() && total >= 0.0 {
+        Some(total)
+    } else {
+        None
+    }
+}
+
+/// Converts subtitle text (YouTube XML `<transcript>` / `<timedtext>` or WebVTT) into the target format (`vtt`, `srt`, `sbv`).
+pub fn convert_subtitle_payload(body: &str, target_format: &str) -> String {
+    let fmt = target_format.trim().to_ascii_lowercase();
+    let trimmed = body.trim();
+    let is_xml = trimmed.starts_with("<?xml")
+        || trimmed.starts_with("<transcript")
+        || trimmed.starts_with("<timedtext");
+
+    if !is_xml {
+        if fmt == "vtt" && trimmed.starts_with("WEBVTT") {
+            return body.to_string();
+        }
+        if fmt == "srt" && !trimmed.starts_with("WEBVTT") && trimmed.contains("-->") {
+            return body.to_string();
+        }
+        // Convert simple WebVTT cues to SRT or SBV if requested
+        if trimmed.starts_with("WEBVTT") && (fmt == "srt" || fmt == "sbv") {
+            let cues = parse_vtt_cues(trimmed);
+            if !cues.is_empty() {
+                return render_cues(&cues, &fmt);
+            }
+        }
+        return body.to_string();
+    }
+
+    let cues = parse_xml_timedtext_cues(trimmed);
+    render_cues(&cues, &fmt)
+}
+
+fn parse_xml_timedtext_cues(xml: &str) -> Vec<(u64, u64, String)> {
+    use quick_xml::events::Event;
+    use quick_xml::reader::Reader;
+
+    let mut reader = Reader::from_str(xml);
+    reader.config_mut().trim_text(false);
+    let mut cues = Vec::new();
+    let mut current_range: Option<(u64, u64)> = None;
+    let mut current_text = String::new();
+
+    loop {
+        match reader.read_event() {
+            Ok(Event::Start(e)) => {
+                let name = e.name();
+                if name.as_ref() == b"text" || name.as_ref() == b"p" {
+                    let mut start_ms = None;
+                    let mut dur_ms = None;
+                    for attr in e.attributes().flatten() {
+                        let key = attr.key.as_ref();
+                        let val = String::from_utf8_lossy(&attr.value);
+                        if key == b"start" {
+                            start_ms = val.parse::<f64>().ok().map(|s| (s * 1000.0).round() as u64);
+                        } else if key == b"dur" {
+                            dur_ms = val.parse::<f64>().ok().map(|d| (d * 1000.0).round() as u64);
+                        } else if key == b"t" {
+                            start_ms = val.parse::<u64>().ok();
+                        } else if key == b"d" {
+                            dur_ms = val.parse::<u64>().ok();
+                        }
+                    }
+                    if let Some(s) = start_ms {
+                        let d = dur_ms.unwrap_or(2500);
+                        current_range = Some((s, s + d));
+                        current_text.clear();
+                    }
+                }
+            }
+            Ok(Event::Text(t)) => {
+                if current_range.is_some() {
+                    let raw = String::from_utf8_lossy(t.as_ref());
+                    current_text.push_str(&unescape_xml_entities(&raw));
+                }
+            }
+            Ok(Event::End(e)) => {
+                let name = e.name();
+                if (name.as_ref() == b"text" || name.as_ref() == b"p")
+                    && let Some((s, end)) = current_range.take()
+                {
+                    let clean = current_text.trim().to_string();
+                    if !clean.is_empty() {
+                        cues.push((s, end, clean));
+                    }
+                }
+            }
+            Ok(Event::Eof) | Err(_) => break,
+            _ => {}
+        }
+    }
+    cues
+}
+
+fn parse_vtt_cues(vtt: &str) -> Vec<(u64, u64, String)> {
+    let mut cues = Vec::new();
+    for block in vtt.split("\n\n") {
+        let mut lines = block.lines();
+        let Some(first) = lines.next() else {
+            continue;
+        };
+        let ts_line = if first.contains("-->") {
+            first
+        } else {
+            let Some(second) = lines.next() else {
+                continue;
+            };
+            if !second.contains("-->") {
+                continue;
+            }
+            second
+        };
+        let Some((a, b)) = ts_line.split_once("-->") else {
+            continue;
+        };
+        let Some(start_s) = parse_timestamp_seconds(a.trim()) else {
+            continue;
+        };
+        let end_token = b.split_whitespace().next().unwrap_or("");
+        let Some(end_s) = parse_timestamp_seconds(end_token) else {
+            continue;
+        };
+        let text: String = lines.collect::<Vec<_>>().join("\n");
+        if !text.trim().is_empty() {
+            cues.push((
+                (start_s * 1000.0).round() as u64,
+                (end_s * 1000.0).round() as u64,
+                text,
+            ));
+        }
+    }
+    cues
+}
+
+fn render_cues(cues: &[(u64, u64, String)], fmt: &str) -> String {
+    match fmt {
+        "srt" => {
+            let mut out = String::new();
+            for (idx, (start_ms, end_ms, text)) in cues.iter().enumerate() {
+                out.push_str(&format!(
+                    "{}\n{} --> {}\n{}\n\n",
+                    idx + 1,
+                    fmt_ts(*start_ms, ','),
+                    fmt_ts(*end_ms, ','),
+                    text
+                ));
+            }
+            out
+        }
+        "sbv" => {
+            let mut out = String::new();
+            for (start_ms, end_ms, text) in cues {
+                out.push_str(&format!(
+                    "{},{}\n{}\n\n",
+                    fmt_ts(*start_ms, '.'),
+                    fmt_ts(*end_ms, '.'),
+                    text
+                ));
+            }
+            out
+        }
+        _ => {
+            let mut out = String::from("WEBVTT\n\n");
+            for (start_ms, end_ms, text) in cues {
+                out.push_str(&format!(
+                    "{} --> {}\n{}\n\n",
+                    fmt_ts(*start_ms, '.'),
+                    fmt_ts(*end_ms, '.'),
+                    text
+                ));
+            }
+            out
+        }
+    }
+}
+
+fn fmt_ts(ms: u64, sep: char) -> String {
+    let hours = ms / 3_600_000;
+    let minutes = (ms % 3_600_000) / 60_000;
+    let seconds = (ms % 60_000) / 1_000;
+    let millis = ms % 1_000;
+    format!("{hours:02}:{minutes:02}:{seconds:02}{sep}{millis:03}")
+}
+
+fn unescape_xml_entities(s: &str) -> String {
+    s.replace("&amp;", "&")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&#39;", "'")
+        .replace("&apos;", "'")
 }

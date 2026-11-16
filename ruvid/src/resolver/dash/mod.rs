@@ -60,6 +60,7 @@ pub fn resolve_dash_from_xml(
                         name: Some(rep.id.clone()),
                         url: rep_base.to_string(),
                         format: format.to_string(),
+                        is_auto: false,
                     });
                 }
                 continue;
@@ -195,6 +196,7 @@ pub fn resolve_dash_from_xml(
         default_ext,
         streams,
         subtitles,
+        chapters: Vec::new(),
         user_agent_override: None,
     })
 }

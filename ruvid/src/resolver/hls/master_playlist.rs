@@ -57,6 +57,7 @@ pub fn parse_master_playlist(
                     name,
                     url: joined.to_string(),
                     format: format.to_string(),
+                    is_auto: false,
                 });
             }
             continue;
@@ -121,6 +122,7 @@ pub fn parse_master_playlist(
         default_ext: "ts".to_string(),
         streams,
         subtitles,
+        chapters: Vec::new(),
         user_agent_override: None,
     })
 }

@@ -52,7 +52,17 @@ pub fn render_source_info_human(source: &MediaSource, all_formats: bool) {
     if !source.subtitles.is_empty() {
         println!("Subtitles ({}):", source.subtitles.len());
         for sub in &source.subtitles {
-            println!("  {} ({})", sub.language, sub.format);
+            let tag = if sub.is_auto { " [auto]" } else { "" };
+            println!("  {} ({}){tag}", sub.language, sub.format);
+        }
+    }
+    if !source.chapters.is_empty() {
+        println!("Chapters ({}):", source.chapters.len());
+        for ch in &source.chapters {
+            println!(
+                "  {:.1}s - {:.1}s: {}",
+                ch.start_seconds, ch.end_seconds, ch.title
+            );
         }
     }
 }

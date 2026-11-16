@@ -146,8 +146,16 @@ async fn handle_get(
         headers,
         write_manifest: args.write_manifest,
         to_stdout: args.stdout,
-        subtitles: args.subtitles,
+        subtitles: args.subtitles || args.auto_subs,
         subtitles_lang: args.subtitles_lang,
+        sub_format: args.sub_format,
+        auto_subs: args.auto_subs,
+        audio_lang: args.audio_lang,
+        split_chapters: args.split_chapters,
+        clip: args.clip,
+        start_time: args.start_time,
+        end_time: args.end_time,
+        duration_seconds: args.duration,
         allow_private_net: allow_private,
     };
 
@@ -238,6 +246,14 @@ async fn handle_playlist(
                 to_stdout: false,
                 subtitles: false,
                 subtitles_lang: None,
+                sub_format: "vtt".to_string(),
+                auto_subs: false,
+                audio_lang: None,
+                split_chapters: false,
+                clip: None,
+                start_time: None,
+                end_time: None,
+                duration_seconds: None,
                 allow_private_net: allow_private,
             };
 

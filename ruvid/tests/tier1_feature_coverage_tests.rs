@@ -686,13 +686,14 @@ async fn t1_f4_01_parses_description_chapters_in_watch_html() {
     let tmp = tempfile::tempdir().unwrap();
 
     // Inspect via info
-    let output = common::ruvid_cmd(tmp.path())
+    common::ruvid_cmd(tmp.path())
         .env("RUVID_DISABLE_YTDLP", "1")
         .args(["info", &format!("{}/watch_chap", server.base_url), "--json"])
-        .output()
-        .unwrap();
-
-    assert!(output.status.success() || output.status.code() == Some(0));
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""title": "Intro""#))
+        .stdout(predicate::str::contains(r#""title": "Architecture""#))
+        .stdout(predicate::str::contains(r#""title": "Benchmark""#));
 }
 
 #[tokio::test]
@@ -708,18 +709,25 @@ async fn t1_f4_02_parses_macro_markers_key_moments() {
         r#"<html><body><script>var ytInitialPlayerResponse = {{
           "playabilityStatus": {{"status": "OK"}},
           "videoDetails": {{"title": "Moments Video", "videoId": "moments123", "shortDescription": "Key moments demo"}},
-          "streamingData": {{"formats": []}}
+          "streamingData": {{"formats": [{{"itag": 18, "url": "{}/m.mp4", "mimeType": "video/mp4", "contentLength": "1000"}}]}}
           {}
         }};</script></body></html>"#,
-        macro_markers
+        server.base_url, macro_markers
     );
     server.set_route("/watch_moments", RoutePayload::text(&html, "text/html"));
 
     let tmp = tempfile::tempdir().unwrap();
-    let _ = common::ruvid_cmd(tmp.path())
+    common::ruvid_cmd(tmp.path())
         .env("RUVID_DISABLE_YTDLP", "1")
-        .args(["info", &format!("{}/watch_moments", server.base_url)])
-        .output();
+        .args([
+            "info",
+            &format!("{}/watch_moments", server.base_url),
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""title": "Highlight 1""#))
+        .stdout(predicate::str::contains(r#""title": "Highlight 2""#));
 }
 
 #[tokio::test]
@@ -731,31 +739,74 @@ async fn t1_f4_03_fallback_description_timestamp_parsing() {
         r#"<html><body><script>var ytInitialPlayerResponse = {{
           "playabilityStatus": {{"status": "OK"}},
           "videoDetails": {{"title": "Desc Chapters", "videoId": "desc123", "shortDescription": "{}"}},
-          "streamingData": {{"formats": []}}
+          "streamingData": {{"formats": [{{"itag": 18, "url": "{}/d.mp4", "mimeType": "video/mp4", "contentLength": "1000"}}]}}
         }};</script></body></html>"#,
-        desc
+        desc, server.base_url
     );
     server.set_route("/watch_desc_chap", RoutePayload::text(&html, "text/html"));
 
     let tmp = tempfile::tempdir().unwrap();
-    let _ = common::ruvid_cmd(tmp.path())
+    common::ruvid_cmd(tmp.path())
         .env("RUVID_DISABLE_YTDLP", "1")
-        .args(["info", &format!("{}/watch_desc_chap", server.base_url)])
-        .output();
+        .args([
+            "info",
+            &format!("{}/watch_desc_chap", server.base_url),
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""title": "Introduction""#))
+        .stdout(predicate::str::contains(r#""title": "Native Engine""#))
+        .stdout(predicate::str::contains(r#""title": "Summary""#));
 }
 
 #[tokio::test]
 async fn t1_f4_04_split_chapters_cli_contract() {
+    let server = MockHttpServer::start().await;
+    let video_bytes = Mp4FixtureBuilder::new().duration(30.0).build_faststart();
+    server.set_route(
+        "/chap_full.mp4",
+        RoutePayload::bytes(video_bytes.clone(), "video/mp4"),
+    );
+
+    let chapters = [("Part One", 0.0), ("Part Two", 10.0), ("Part Three", 20.0)];
+    let formats = format!(
+        r#"[{{"itag": 18, "url": "{}/chap_full.mp4", "mimeType": "video/mp4", "contentLength": "{}"}}]"#,
+        server.base_url,
+        video_bytes.len()
+    );
+    let html = PlaylistFixtureBuilder::build_youtube_watch_html(
+        "Split Demo",
+        "split01",
+        &formats,
+        "[]",
+        "[]",
+        &chapters,
+    );
+    server.set_route("/watch_split", RoutePayload::text(&html, "text/html"));
+
     let tmp = tempfile::tempdir().unwrap();
+    let out_file = tmp.path().join("full.mp4");
 
-    // Verify --split-chapters CLI argument is defined or handled cleanly
-    let out = common::ruvid_cmd(tmp.path())
-        .args(["get", "http://127.0.0.1:9999/test.mp4", "--split-chapters"])
-        .output()
-        .unwrap();
+    common::ruvid_cmd(tmp.path())
+        .env("RUVID_DISABLE_YTDLP", "1")
+        .args([
+            "get",
+            &format!("{}/watch_split", server.base_url),
+            "--split-chapters",
+            "-o",
+            out_file.to_str().unwrap(),
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("01 - Part One.mp4"))
+        .stdout(predicate::str::contains("02 - Part Two.mp4"))
+        .stdout(predicate::str::contains("03 - Part Three.mp4"));
 
-    // Must not panic with unexpected crash; returns standard exit code
-    assert!(out.status.code().is_some());
+    assert!(tmp.path().join("01 - Part One.mp4").is_file());
+    assert!(tmp.path().join("02 - Part Two.mp4").is_file());
+    assert!(tmp.path().join("03 - Part Three.mp4").is_file());
 }
 
 #[tokio::test]
