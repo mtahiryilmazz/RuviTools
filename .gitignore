@@ -2,6 +2,8 @@
 target/
 **/*.rs.bk
 *.pdb
+*.exe
+ruvitube/bin/
 
 # Build & ara çıktılar
 build/
