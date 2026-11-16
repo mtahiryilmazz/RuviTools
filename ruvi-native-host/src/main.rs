@@ -14,7 +14,6 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
-const MAX_RANGE_SECONDS: f64 = 6.0 * 3600.0;
 
 #[derive(Debug, Clone, Deserialize)]
 struct ClipSpec {
@@ -93,12 +92,6 @@ fn validate_clip(clip: &ClipSpec) -> Result<(), &'static str> {
     }
     if clip.start_sec < 0.0 || clip.end_sec <= clip.start_sec {
         return Err("Kesit bitişi başlangıçtan sonra olmalı.");
-    }
-    if clip.end_sec - clip.start_sec > MAX_RANGE_SECONDS {
-        return Err("Kesit en fazla 6 saat olabilir.");
-    }
-    if clip.end_sec > 86400.0 {
-        return Err("Kesit zamanı video sınırının dışında.");
     }
     Ok(())
 }
@@ -495,5 +488,102 @@ async fn main() {
                 );
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_clip_normal() {
+        let clip = ClipSpec {
+            start_sec: 10.0,
+            end_sec: 30.0,
+        };
+        assert!(validate_clip(&clip).is_ok());
+    }
+
+    #[test]
+    fn test_validate_clip_long_duration_over_6h() {
+        // Benchmark video AKeUssuu3Is duration: 36738.125s (10h 12m 18s)
+        let clip = ClipSpec {
+            start_sec: 0.0,
+            end_sec: 36738.125,
+        };
+        assert!(validate_clip(&clip).is_ok());
+    }
+
+    #[test]
+    fn test_validate_clip_over_24h() {
+        // Stream clipping beyond 24h
+        let clip = ClipSpec {
+            start_sec: 86500.0,
+            end_sec: 86600.0,
+        };
+        assert!(validate_clip(&clip).is_ok());
+    }
+
+    #[test]
+    fn test_validate_clip_ultra_long_100h() {
+        let clip = ClipSpec {
+            start_sec: 0.0,
+            end_sec: 360000.0,
+        };
+        assert!(validate_clip(&clip).is_ok());
+    }
+
+    #[test]
+    fn test_validate_clip_invalid_negative_start() {
+        let clip = ClipSpec {
+            start_sec: -1.0,
+            end_sec: 10.0,
+        };
+        assert_eq!(
+            validate_clip(&clip),
+            Err("Kesit bitişi başlangıçtan sonra olmalı.")
+        );
+    }
+
+    #[test]
+    fn test_validate_clip_invalid_end_before_start() {
+        let clip = ClipSpec {
+            start_sec: 20.0,
+            end_sec: 10.0,
+        };
+        assert_eq!(
+            validate_clip(&clip),
+            Err("Kesit bitişi başlangıçtan sonra olmalı.")
+        );
+    }
+
+    #[test]
+    fn test_validate_clip_invalid_equal_start_end() {
+        let clip = ClipSpec {
+            start_sec: 10.0,
+            end_sec: 10.0,
+        };
+        assert_eq!(
+            validate_clip(&clip),
+            Err("Kesit bitişi başlangıçtan sonra olmalı.")
+        );
+    }
+
+    #[test]
+    fn test_validate_clip_invalid_nan() {
+        let clip = ClipSpec {
+            start_sec: f64::NAN,
+            end_sec: 10.0,
+        };
+        assert_eq!(validate_clip(&clip), Err("Kesit zamanı geçersiz."));
+    }
+
+    #[test]
+    fn test_validate_clip_invalid_infinite() {
+        let clip = ClipSpec {
+            start_sec: 0.0,
+            end_sec: f64::INFINITY,
+        };
+        assert_eq!(validate_clip(&clip), Err("Kesit zamanı geçersiz."));
     }
 }
