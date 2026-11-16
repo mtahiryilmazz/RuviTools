@@ -5,7 +5,7 @@ use std::sync::Arc;
 
 use futures::StreamExt;
 use reqwest::StatusCode;
-use reqwest::header::{CONTENT_RANGE, ETAG, LAST_MODIFIED, RANGE};
+use reqwest::header::{CONTENT_RANGE, ETAG, LAST_MODIFIED};
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
@@ -41,7 +41,7 @@ pub fn plan_chunks(total_bytes: u64, jobs: usize) -> Vec<ChunkRange> {
     if total_bytes == 0 {
         return Vec::new();
     }
-    let chunk_size = if total_bytes >= 16 * 1024 && jobs > 1 {
+    let chunk_size = if total_bytes >= 16 * 1024 {
         let target_chunks = (jobs * 2).max(2) as u64;
         (total_bytes.div_ceil(target_chunks)).clamp(4096, 2 * 1024 * 1024)
     } else {
@@ -121,29 +121,29 @@ pub async fn download_direct_http(
     let part_path = part_file_path(&plan.output_path);
     let ckpt_path = checkpoint_path_for(&part_path);
 
-    let (total_bytes, accept_ranges, etag, last_modified) = if total_bytes.is_none() {
-        if let Ok(meta) = probe_http_resource(ctx, url).await {
-            if let Some(t) = meta.total_bytes {
-                progress.set_total(t);
-            }
-            (
-                meta.total_bytes.or(total_bytes),
-                meta.accept_ranges || accept_ranges,
-                etag.or(meta.etag),
-                last_modified.or(meta.last_modified),
-            )
-        } else {
-            (total_bytes, accept_ranges, etag, last_modified)
+    let (resolved_url, total_bytes, accept_ranges, etag, last_modified) = if total_bytes.is_none()
+        && let Ok(meta) = probe_http_resource(ctx, url).await
+    {
+        if let Some(t) = meta.total_bytes {
+            progress.set_total(t);
         }
+        (
+            meta.final_url.to_string(),
+            meta.total_bytes,
+            meta.accept_ranges || accept_ranges,
+            etag.or(meta.etag),
+            last_modified.or(meta.last_modified),
+        )
     } else {
         if let Some(t) = total_bytes {
             progress.set_total(t);
         }
-        (total_bytes, accept_ranges, etag, last_modified)
+        (url.to_string(), total_bytes, accept_ranges, etag, last_modified)
     };
+    let url = &resolved_url;
 
     let can_parallel_range =
-        accept_ranges && plan.jobs > 1 && total_bytes.is_some_and(|t| t >= 16 * 1024);
+        accept_ranges && total_bytes.is_some_and(|t| t >= 16 * 1024);
 
     if !can_parallel_range {
         if !plan.resume {
@@ -357,17 +357,9 @@ async fn download_one_chunk(
         let range_val = range_header.clone();
         async move {
             let parsed = ctx.validate_url(url).map_err(RetryableError::Permanent)?;
-            let resp = ctx
-                .client
-                .get(parsed)
-                .header(RANGE, range_val)
-                .send()
-                .await
-                .map_err(RetryableError::from_reqwest)?;
-
-            let final_url = resp.url().clone();
-            validate_url_security(&final_url, ctx.allow_private_net)
-                .map_err(RetryableError::Permanent)?;
+            let (resp, final_url) = ctx
+                .get_with_range_following_redirects(&parsed, &range_val)
+                .await?;
 
             let status = resp.status();
             if status == StatusCode::OK {

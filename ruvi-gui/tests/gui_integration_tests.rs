@@ -1,6 +1,6 @@
 use assert_cmd::Command;
 use predicates::prelude::*;
-use ruvi_gui::{ActiveTab, MediaOperationKind, RuviStudioApp};
+use ruvi_gui::{ActiveTab, MediaOperationKind, RuviStudioApp, StudioTheme};
 
 #[test]
 fn app_builds_download_job_with_all_options() {
@@ -34,6 +34,51 @@ fn app_builds_download_job_with_all_options() {
     assert_eq!(job.start_time.as_deref(), Some("00:00:05"));
     assert_eq!(job.end_time.as_deref(), Some("00:00:20"));
     assert_eq!(job.duration_seconds, Some(15.0));
+}
+
+#[test]
+fn theme_switching_visuals_and_card_frames() {
+    assert_eq!(StudioTheme::default(), StudioTheme::Dark);
+
+    let dark = StudioTheme::Dark;
+    let light = StudioTheme::Light;
+
+    let dark_vis = dark.visuals();
+    let light_vis = light.visuals();
+    assert!(dark_vis.dark_mode);
+    assert!(!light_vis.dark_mode);
+
+    assert_ne!(dark.accent_primary(), light.accent_primary());
+    assert_ne!(dark.accent_secondary(), light.accent_secondary());
+    assert_ne!(dark.accent_purple(), light.accent_purple());
+    assert_ne!(dark.text_muted(), light.text_muted());
+    assert_ne!(dark.status_text(), light.status_text());
+    assert_ne!(dark.error_banner_fill(), light.error_banner_fill());
+    assert_ne!(dark.error_banner_stroke(), light.error_banner_stroke());
+    assert_ne!(dark.error_banner_text(), light.error_banner_text());
+
+    let dark_frame = dark.card_frame();
+    let light_frame = light.card_frame();
+    assert_ne!(dark_frame.fill, light_frame.fill);
+}
+
+#[test]
+fn app_theme_toggle_and_ruvitube_setup_card() {
+    let mut app = RuviStudioApp::default();
+    assert_eq!(app.current_theme, StudioTheme::Dark);
+    assert_eq!(app.theme(), StudioTheme::Dark);
+
+    app.set_theme(StudioTheme::Light);
+    assert_eq!(app.current_theme, StudioTheme::Light);
+    assert_eq!(app.theme(), StudioTheme::Light);
+
+    assert!(!app.getube_dir.trim().is_empty());
+    app.check_getube_status();
+    assert!(!app.getube_status.is_empty());
+
+    // RuviTube compatibility aliases
+    app.check_ruvitube_status();
+    assert!(!app.getube_status.is_empty());
 }
 
 #[test]

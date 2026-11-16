@@ -1,0 +1,92 @@
+/* GeTube — ayarlar sayfası. Tek doğruluk kaynağı chrome.storage.local: 'getube.settings'. */
+'use strict';
+
+// Arayüz Türkçe: tarayıcı dilinden bağımsız sabit metinler.
+const TR = {
+  optTitle: 'GeTube ayarları',
+  extName: 'GeTube',
+  optDefaults: 'Varsayılanlar',
+  optVideoQuality: 'Varsayılan görüntü kalitesi',
+  optAudioQuality: 'Varsayılan ses kalitesi',
+  optClipLength: 'Varsayılan kesit süresi (saniye)',
+  optAfterDownload: 'İndirme sonrası',
+  optOpenDownloads: 'Chrome İndirilenler sayfasını aç',
+  optOpenFile: 'İndirilen dosyayı aç',
+  optOpenFolder: 'İndirme klasörünü aç',
+  optBehavior: 'Davranış',
+  optShowStatus: 'Düğme üzerinde yüzde göster',
+  optRememberClip: 'Son kullanılan kesit süresini hatırla',
+  optSaved: 'Kaydedildi',
+  optReset: 'Varsayılana dön'
+};
+
+const SETTINGS_KEY = 'ruvitube.settings';
+const DEFAULTS = {
+  openDownloads: false,
+  openFile: false,
+  openFolder: false,
+  videoQuality: '720p',
+  audioQuality: '320kbps',
+  clipLength: 30,
+  rememberClip: true,
+  showStatus: true
+};
+
+const CHECKS = ['openDownloads', 'openFile', 'openFolder', 'rememberClip', 'showStatus'];
+const SELECTS = ['videoQuality', 'audioQuality'];
+const $ = id => document.getElementById(id);
+
+function applyI18n() {
+  document.querySelectorAll('[data-i18n]').forEach(node => {
+    const message = TR[node.dataset.i18n];
+    if (message) node.textContent = message;
+  });
+  document.documentElement.lang = 'tr';
+  $('version').textContent = chrome.runtime.getManifest().version;
+}
+
+function readForm() {
+  const value = {};
+  CHECKS.forEach(id => { value[id] = $(id).checked; });
+  SELECTS.forEach(id => { value[id] = $(id).value; });
+  const clip = Number($('clipLength').value);
+  value.clipLength = isFinite(clip) ? Math.max(1, Math.round(clip)) : DEFAULTS.clipLength;
+  return value;
+}
+
+function render(settings) {
+  CHECKS.forEach(id => { $(id).checked = !!settings[id]; });
+  SELECTS.forEach(id => { $(id).value = settings[id]; });
+  $('clipLength').value = String(settings.clipLength);
+}
+
+let saveTimer = 0;
+function scheduleSave() {
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(async () => {
+    const settings = readForm();
+    await chrome.storage.local.set({ [SETTINGS_KEY]: settings });
+    render(settings);
+    const badge = $('saved');
+    badge.classList.add('show');
+    setTimeout(() => badge.classList.remove('show'), 1200);
+  }, 180);
+}
+
+async function load() {
+  const stored = await chrome.storage.local.get(SETTINGS_KEY);
+  render(Object.assign({}, DEFAULTS, (stored && stored[SETTINGS_KEY]) || {}));
+}
+
+applyI18n();
+load();
+
+CHECKS.concat(SELECTS).forEach(id => {
+  $(id).addEventListener('change', scheduleSave);
+});
+$('clipLength').addEventListener('change', scheduleSave);
+
+$('reset').addEventListener('click', async () => {
+  await chrome.storage.local.set({ [SETTINGS_KEY]: Object.assign({}, DEFAULTS) });
+  render(DEFAULTS);
+});

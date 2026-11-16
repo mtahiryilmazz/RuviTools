@@ -57,12 +57,6 @@ pub async fn resolve_youtube_from_html(
     final_url: &Url,
     html: &str,
 ) -> RuviResult<Option<MediaSource>> {
-    // Check if the HTML itself already carries direct playable URLs (e.g. test fixtures)
-    if let Ok(Some(native_html_source)) = extract_youtube_player_response(raw_url, final_url, html)
-    {
-        return Ok(Some(native_html_source));
-    }
-
     let parsed_raw = ctx.validate_url(raw_url).ok();
     let is_yt = is_youtube_url(final_url)
         || parsed_raw.as_ref().is_some_and(is_youtube_url)
@@ -77,55 +71,46 @@ pub async fn resolve_youtube_from_html(
     let video_id =
         extract_video_id(final_url).or_else(|| parsed_raw.as_ref().and_then(extract_video_id));
 
-    let Some(video_id) = video_id else {
-        return Ok(None);
-    };
+    if let Some(video_id) = video_id {
+        let visitor_data = extract_visitor_data(html);
+        let innertube_base = Url::parse(&format!(
+            "{}://{}{}",
+            final_url.scheme(),
+            final_url.host_str().unwrap_or("www.youtube.com"),
+            final_url
+                .port()
+                .map(|p| format!(":{p}"))
+                .unwrap_or_default()
+        ))
+        .unwrap_or_else(|_| final_url.clone());
 
-    let visitor_data = extract_visitor_data(html);
-    let innertube_base = Url::parse(&format!(
-        "{}://{}{}",
-        final_url.scheme(),
-        final_url.host_str().unwrap_or("www.youtube.com"),
-        final_url
-            .port()
-            .map(|p| format!(":{p}"))
-            .unwrap_or_default()
-    ))
-    .unwrap_or_else(|_| final_url.clone());
-
-    let api_url = innertube_base
-        .join("/youtubei/v1/player?prettyPrint=false")
-        .map_err(|err| RuviError::Unsupported(err.to_string()))?;
-
-    // Try ANDROID client first (provides direct muxed progressive streams + adaptive streams),
-    // then fall back to IOS client (provides HLS + adaptive streams).
-    let mut last_err = None;
-    for profile in [InnertubeClient::Android, InnertubeClient::Ios] {
-        match query_innertube_player(ctx, &api_url, &video_id, visitor_data.as_deref(), profile)
-            .await
-        {
-            Ok(player_json) => {
-                match parse_player_response_json(
-                    raw_url,
-                    &innertube_base,
-                    &player_json,
-                    Some(profile.user_agent()),
-                ) {
-                    Ok(Some(source)) => return Ok(Some(source)),
-                    Ok(None) => {}
-                    Err(err) => {
-                        last_err = Some(err);
+        if let Ok(api_url) = innertube_base.join("/youtubei/v1/player?prettyPrint=false") {
+            // Try IOS client first: iOS provides pristine adaptive 1080p/4K and 140 AAC streams
+            // that download without bot blocks or HTTP 403.
+            // iOS client must NOT receive desktop web visitor_data, which causes Google 403 Forbidden.
+            // Fall back to Android client for environments where iOS is restricted.
+            for profile in [InnertubeClient::Ios, InnertubeClient::Android] {
+                let v_data = match profile {
+                    InnertubeClient::Ios => None,
+                    InnertubeClient::Android => visitor_data.as_deref(),
+                };
+                if let Ok(player_json) = query_innertube_player(ctx, &api_url, &video_id, v_data, profile).await {
+                    if let Ok(Some(source)) = parse_player_response_json(
+                        raw_url,
+                        &innertube_base,
+                        &player_json,
+                        Some(profile.user_agent()),
+                    ) {
+                        return Ok(Some(source));
                     }
                 }
-            }
-            Err(err) => {
-                last_err = Some(err);
             }
         }
     }
 
-    if let Some(err) = last_err {
-        return Err(err);
+    // Fall back to HTML-embedded ytInitialPlayerResponse (e.g. offline test fixtures)
+    if let Ok(Some(native_html_source)) = extract_youtube_player_response(raw_url, final_url, html) {
+        return Ok(Some(native_html_source));
     }
 
     Ok(None)

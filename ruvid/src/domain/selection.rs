@@ -34,6 +34,27 @@ pub fn select_stream_with_lang<'a>(
         }
     }
 
+    let trimmed = spec.trim();
+    if trimmed.eq_ignore_ascii_case("bestaudio") || trimmed.eq_ignore_ascii_case("audio") {
+        let audios: Vec<&MediaStream> = streams
+            .iter()
+            .filter(|s| s.kind == StreamKind::Audio || s.kind == StreamKind::VideoAudio)
+            .collect();
+        // Prefer m4a / mp4a / AAC audio streams first for optimal compatibility and direct playback, then highest bandwidth
+        if let Some(best_m4a) = audios
+            .iter()
+            .copied()
+            .filter(|s| s.container.eq_ignore_ascii_case("m4a") || s.container.eq_ignore_ascii_case("mp4"))
+            .max_by_key(|s| s.bandwidth_bps.unwrap_or(0))
+        {
+            return Ok(best_m4a);
+        }
+        return audios
+            .into_iter()
+            .max_by_key(|s| s.bandwidth_bps.unwrap_or(0))
+            .ok_or_else(|| RuviError::Unsupported("no audio stream available".to_string()));
+    }
+
     // For automatic selection (`best` / `worst`), prefer muxed VideoAudio streams when available
     // so downloads contain both video and audio without requiring external muxing.
     let combined: Vec<&MediaStream> = streams
@@ -46,7 +67,6 @@ pub fn select_stream_with_lang<'a>(
         combined
     };
 
-    let trimmed = spec.trim();
     if trimmed.is_empty() || trimmed.eq_ignore_ascii_case("best") {
         return pool
             .into_iter()

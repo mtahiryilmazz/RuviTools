@@ -22,6 +22,7 @@ pub const MAX_REDIRECTS: usize = 10;
 #[derive(Debug, Clone)]
 pub struct ResolveContext {
     pub client: reqwest::Client,
+    pub no_redirect_client: reqwest::Client,
     pub custom_headers: HeaderMap,
     pub allow_private_net: bool,
     pub timeout: Duration,
@@ -63,12 +64,45 @@ impl ResolveContext {
             attempt.follow()
         });
 
+        let mut full_headers = headers.clone();
+        if !full_headers.contains_key(reqwest::header::ACCEPT) {
+            full_headers.insert(
+                reqwest::header::ACCEPT,
+                reqwest::header::HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
+            );
+        }
+        if !full_headers.contains_key(reqwest::header::ACCEPT_LANGUAGE) {
+            full_headers.insert(
+                reqwest::header::ACCEPT_LANGUAGE,
+                reqwest::header::HeaderValue::from_static("en-US,en;q=0.9"),
+            );
+        }
+        if !full_headers.contains_key(reqwest::header::ACCEPT_ENCODING) {
+            full_headers.insert(
+                reqwest::header::ACCEPT_ENCODING,
+                reqwest::header::HeaderValue::from_static("identity"),
+            );
+        }
+        if !full_headers.contains_key("sec-fetch-mode") {
+            full_headers.insert(
+                reqwest::header::HeaderName::from_static("sec-fetch-mode"),
+                reqwest::header::HeaderValue::from_static("navigate"),
+            );
+        }
+
         let mut builder = reqwest::Client::builder()
             .user_agent(user_agent)
             .connect_timeout(Duration::from_secs(connect_timeout_secs))
             .timeout(Duration::from_secs(request_timeout_secs))
             .redirect(redirect_policy)
-            .default_headers(headers.clone());
+            .default_headers(full_headers.clone());
+
+        let mut no_redirect_builder = reqwest::Client::builder()
+            .user_agent(user_agent)
+            .connect_timeout(Duration::from_secs(connect_timeout_secs))
+            .timeout(Duration::from_secs(request_timeout_secs))
+            .redirect(Policy::none())
+            .default_headers(full_headers);
 
         if let Some(proxy_url) = proxy {
             let p = reqwest::Proxy::all(proxy_url).map_err(|err| {
@@ -77,20 +111,74 @@ impl ResolveContext {
                     redact_sensitive_url(proxy_url)
                 ))
             })?;
-            builder = builder.proxy(p);
+            builder = builder.proxy(p.clone());
+            no_redirect_builder = no_redirect_builder.proxy(p);
+        }
+
+        if let Ok(ip_str) = std::env::var("RUVID_SOURCE_ADDRESS") {
+            if let Ok(ip) = ip_str.trim().parse::<std::net::IpAddr>() {
+                builder = builder.local_address(ip);
+                no_redirect_builder = no_redirect_builder.local_address(ip);
+            }
         }
 
         let client = builder
             .build()
             .map_err(|err| RuviError::Network(format!("failed to construct HTTP client: {err}")))?;
 
+        let no_redirect_client = no_redirect_builder
+            .build()
+            .map_err(|err| RuviError::Network(format!("failed to construct no-redirect HTTP client: {err}")))?;
+
         Ok(Self {
             client,
+            no_redirect_client,
             custom_headers: headers,
             allow_private_net: allow_priv,
             timeout: Duration::from_secs(request_timeout_secs),
             retry_count,
         })
+    }
+
+    pub async fn get_with_range_following_redirects(
+        &self,
+        initial_url: &Url,
+        range: &str,
+    ) -> Result<(reqwest::Response, Url), crate::downloader::retry::RetryableError> {
+        let mut current_url = initial_url.clone();
+        for _hop in 0..MAX_REDIRECTS {
+            validate_url_security(&current_url, self.allow_private_net)
+                .map_err(crate::downloader::retry::RetryableError::Permanent)?;
+
+            let resp = self
+                .no_redirect_client
+                .get(current_url.clone())
+                .header(reqwest::header::RANGE, range)
+                .send()
+                .await
+                .map_err(crate::downloader::retry::RetryableError::from_reqwest)?;
+
+            let status = resp.status();
+            let loc_opt = resp.headers().get(reqwest::header::LOCATION).cloned();
+
+            if status.is_redirection() {
+                if let Some(loc) = loc_opt {
+                    let loc_str = loc
+                        .to_str()
+                        .map_err(|e| crate::downloader::retry::RetryableError::Permanent(RuviError::Network(e.to_string())))?;
+                    let next_url = current_url
+                        .join(loc_str)
+                        .map_err(|e| crate::downloader::retry::RetryableError::Permanent(RuviError::Network(e.to_string())))?;
+                    current_url = next_url;
+                    continue;
+                }
+            }
+
+            return Ok((resp, current_url));
+        }
+        Err(crate::downloader::retry::RetryableError::Permanent(RuviError::Network(
+            "too many redirects following range request".to_string(),
+        )))
     }
 
     pub fn validate_url(&self, raw: &str) -> RuviResult<Url> {

@@ -50,6 +50,143 @@ impl MediaOperationKind {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub enum StudioTheme {
+    Dark,
+    Light,
+}
+
+impl Default for StudioTheme {
+    fn default() -> Self {
+        Self::Dark
+    }
+}
+
+impl StudioTheme {
+    pub fn visuals(&self) -> egui::Visuals {
+        match self {
+            Self::Dark => {
+                let mut visuals = egui::Visuals::dark();
+                visuals.panel_fill = Color32::from_rgb(13, 18, 30);
+                visuals.window_fill = Color32::from_rgb(18, 25, 40);
+                visuals.extreme_bg_color = Color32::from_rgb(9, 13, 22);
+                visuals
+            }
+            Self::Light => {
+                let mut visuals = egui::Visuals::light();
+                visuals.panel_fill = Color32::from_rgb(248, 250, 252);
+                visuals.window_fill = Color32::from_rgb(255, 255, 255);
+                visuals.extreme_bg_color = Color32::from_rgb(241, 245, 249);
+                visuals
+            }
+        }
+    }
+
+    pub fn card_frame(&self) -> egui::Frame {
+        match self {
+            Self::Dark => egui::Frame::NONE
+                .fill(Color32::from_rgb(22, 30, 49))
+                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(45, 60, 90)))
+                .inner_margin(12.0)
+                .corner_radius(8.0),
+            Self::Light => egui::Frame::NONE
+                .fill(Color32::from_rgb(255, 255, 255))
+                .stroke(Stroke::new(1.0_f32, Color32::from_rgb(226, 232, 240)))
+                .inner_margin(12.0)
+                .corner_radius(8.0),
+        }
+    }
+
+    pub fn accent_primary(&self) -> Color32 {
+        match self {
+            Self::Dark => Color32::from_rgb(52, 211, 153),
+            Self::Light => Color32::from_rgb(16, 149, 103),
+        }
+    }
+
+    pub fn accent_secondary(&self) -> Color32 {
+        match self {
+            Self::Dark => Color32::from_rgb(56, 189, 248),
+            Self::Light => Color32::from_rgb(2, 132, 199),
+        }
+    }
+
+    pub fn accent_purple(&self) -> Color32 {
+        match self {
+            Self::Dark => Color32::from_rgb(167, 139, 250),
+            Self::Light => Color32::from_rgb(124, 58, 237),
+        }
+    }
+
+    pub fn text_muted(&self) -> Color32 {
+        match self {
+            Self::Dark => Color32::from_rgb(156, 163, 175),
+            Self::Light => Color32::from_rgb(100, 116, 139),
+        }
+    }
+
+    pub fn status_text(&self) -> Color32 {
+        match self {
+            Self::Dark => Color32::from_rgb(209, 213, 219),
+            Self::Light => Color32::from_rgb(51, 65, 85),
+        }
+    }
+
+    pub fn error_banner_fill(&self) -> Color32 {
+        match self {
+            Self::Dark => Color32::from_rgb(69, 18, 28),
+            Self::Light => Color32::from_rgb(254, 242, 242),
+        }
+    }
+
+    pub fn error_banner_stroke(&self) -> Color32 {
+        match self {
+            Self::Dark => Color32::from_rgb(244, 63, 94),
+            Self::Light => Color32::from_rgb(248, 113, 113),
+        }
+    }
+
+    pub fn error_banner_text(&self) -> Color32 {
+        match self {
+            Self::Dark => Color32::from_rgb(253, 164, 175),
+            Self::Light => Color32::from_rgb(159, 18, 57),
+        }
+    }
+
+    pub fn card_header_text(&self) -> Color32 {
+        match self {
+            Self::Dark => Color32::from_rgb(243, 244, 246),
+            Self::Light => Color32::from_rgb(15, 23, 42),
+        }
+    }
+
+    pub fn render_card<R>(
+        &self,
+        ui: &mut egui::Ui,
+        title: Option<&str>,
+        add_contents: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> R {
+        self.card_frame()
+            .show(ui, |ui| {
+                if let Some(t) = title {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(t)
+                                .size(15.0)
+                                .strong()
+                                .color(self.accent_secondary()),
+                        );
+                    });
+                    ui.add_space(4.0);
+                    ui.separator();
+                    ui.add_space(6.0);
+                }
+                add_contents(ui)
+            })
+            .inner
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct TelemetryEntry {
     pub task_name: String,
@@ -147,8 +284,13 @@ pub struct RuviStudioApp {
     pub playlist_skip_errors: bool,
     pub playlist_entries: Vec<(bool, PlaylistEntry)>,
 
-    // Telemetry
+    // Telemetry & Modern UI State
     pub telemetry: StudioTelemetry,
+    pub current_theme: StudioTheme,
+    pub getube_dir: String,
+    pub getube_status: String,
+    pub getube_native_host_found: bool,
+    pub getube_extension_found: bool,
     theme_initialized: bool,
 }
 
@@ -168,7 +310,8 @@ impl Default for RuviStudioApp {
 impl RuviStudioApp {
     pub fn new(runtime: Arc<tokio::runtime::Runtime>) -> Self {
         let (tx, rx) = channel();
-        Self {
+        let default_getube_dir = "d:\\mtahiryilmazz\\Github\\GeTube\\GeTube_v2.0.0".to_string();
+        let mut app = Self {
             active_tab: ActiveTab::Downloader,
             runtime,
             tx,
@@ -178,6 +321,11 @@ impl RuviStudioApp {
                 "Hazir — Saf Rust ruvid + ruvic motorlari bagli (Sifir harici bagimlilik)."
                     .to_string(),
             error_banner: None,
+            current_theme: StudioTheme::Dark,
+            getube_dir: default_getube_dir,
+            getube_status: "Kuruluma hazır. 'GeTube Eklentisini Kur' butonuna tıklayarak Native Host'u kaydedebilirsiniz.".to_string(),
+            getube_native_host_found: false,
+            getube_extension_found: false,
             url_input: "https://www.youtube.com/watch?v=jNQXAC9IVRw".to_string(),
             output_path_input: "./downloads/%(title)s.%(ext)s".to_string(),
             format_spec: "best".to_string(),
@@ -212,7 +360,223 @@ impl RuviStudioApp {
             playlist_entries: Vec::new(),
             telemetry: StudioTelemetry::default(),
             theme_initialized: false,
+        };
+        app.check_getube_status();
+        app
+    }
+
+    pub fn theme(&self) -> StudioTheme {
+        self.current_theme
+    }
+
+    pub fn set_theme(&mut self, theme: StudioTheme) {
+        self.current_theme = theme;
+    }
+
+    pub fn render_card<R>(
+        &self,
+        ui: &mut egui::Ui,
+        title: Option<&str>,
+        add_contents: impl FnOnce(&mut egui::Ui) -> R,
+    ) -> R {
+        self.current_theme.render_card(ui, title, add_contents)
+    }
+
+    pub fn check_getube_status(&mut self) {
+        let mut base = PathBuf::from(self.getube_dir.trim());
+        if !base.exists() {
+            let alt_path = PathBuf::from("../GeTube/GeTube_v2.0.0");
+            if alt_path.exists() {
+                base = alt_path;
+                self.getube_dir = base.to_string_lossy().to_string();
+            }
         }
+
+        let host_bin = base.join("bin").join("NativeHost.exe");
+        let ext_manifest = base.join("extension").join("manifest.json");
+
+        self.getube_native_host_found = host_bin.is_file();
+        self.getube_extension_found = ext_manifest.is_file();
+
+        if self.getube_native_host_found && self.getube_extension_found {
+            self.getube_status = "✅ GeTube eklentisi ve Native Host hazır durumda.".to_string();
+        } else if self.getube_extension_found {
+            self.getube_status = "ℹ GeTube Chrome eklentisi bulundu. Native Host kurulumu için aşağıdaki butona tıklayın.".to_string();
+        } else {
+            self.getube_status =
+                format!("⚠ Belirtilen dizinde eklenti bulunamadı: {}", base.display());
+        }
+    }
+
+    pub fn install_getube(&mut self) {
+        let base = PathBuf::from(self.getube_dir.trim());
+        let installer_ps1 = base.join("installer").join("Install.ps1");
+        let installer_cmd = base.join("installer").join("Kurulum.cmd");
+        let ext_dir = base.join("extension");
+
+        if !base.exists() {
+            self.getube_status = format!("❌ GeTube dizini bulunamadı: {}", base.display());
+            return;
+        }
+
+        #[cfg(target_os = "windows")]
+        {
+            if installer_ps1.is_file() {
+                let _ = std::process::Command::new("powershell.exe")
+                    .args([
+                        "-NoProfile",
+                        "-ExecutionPolicy",
+                        "Bypass",
+                        "-File",
+                        installer_ps1.to_str().unwrap_or_default(),
+                    ])
+                    .spawn();
+                self.getube_status =
+                    "🚀 GeTube kurulum betiği çalıştırıldı. Native Host kaydediliyor...".to_string();
+            } else if installer_cmd.is_file() {
+                let _ = std::process::Command::new("cmd.exe")
+                    .args(["/C", installer_cmd.to_str().unwrap_or_default()])
+                    .spawn();
+                self.getube_status = "🚀 GeTube Kurulum.cmd çalıştırıldı.".to_string();
+            } else {
+                self.getube_status =
+                    format!("⚠ Kurulum betiği bulunamadı: {}", installer_ps1.display());
+            }
+
+            if ext_dir.is_dir() {
+                let _ = std::process::Command::new("explorer.exe")
+                    .arg(&ext_dir)
+                    .spawn();
+            }
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            self.getube_status = format!("ℹ GeTube eklenti dizini: {}", ext_dir.display());
+        }
+
+        self.check_getube_status();
+        self.status_line = "GeTube kurulumu tetiklendi. Chrome'da 'chrome://extensions' sayfasından 'Paketlenmemiş öge yükle' ile eklentiyi aktifleştirebilirsiniz.".to_string();
+    }
+
+    pub fn open_getube_extension_dir(&self) {
+        let ext_dir = PathBuf::from(self.getube_dir.trim()).join("extension");
+        if ext_dir.is_dir() {
+            #[cfg(target_os = "windows")]
+            let _ = std::process::Command::new("explorer.exe")
+                .arg(&ext_dir)
+                .spawn();
+        }
+    }
+
+    pub fn open_chrome_extensions_page(&self) {
+        #[cfg(target_os = "windows")]
+        let _ = std::process::Command::new("cmd.exe")
+            .args(["/C", "start", "chrome", "chrome://extensions"])
+            .spawn();
+    }
+
+    pub fn check_ruvitube_status(&mut self) {
+        self.check_getube_status();
+    }
+
+    pub fn install_ruvitube(&mut self) {
+        self.install_getube();
+    }
+
+    pub fn open_ruvitube_extension_dir(&self) {
+        self.open_getube_extension_dir();
+    }
+
+    pub fn render_getube_setup_card(&mut self, ui: &mut egui::Ui) {
+        self.render_ruvitube_setup_card(ui);
+    }
+
+    pub fn render_ruvitube_setup_card(&mut self, ui: &mut egui::Ui) {
+        let theme = self.current_theme;
+        theme.render_card(ui, Some("🧩 RuviTube Chrome Eklentisi Entegrasyonu"), |ui| {
+            ui.label(
+                RichText::new(
+                    "RuviTube (GeTube), YouTube web oynatıcısına doğrudan klip kesme ve indirme düğmesi ekleyen Chrome eklentisidir. RuviTools native motoru ile entegre çalışır.",
+                )
+                .color(theme.text_muted()),
+            );
+            ui.add_space(6.0);
+
+            ui.horizontal(|ui| {
+                ui.label("Eklenti / Kurulum Dizini:");
+                let edit_res = ui.add(
+                    egui::TextEdit::singleline(&mut self.getube_dir)
+                        .desired_width(360.0)
+                        .hint_text("d:\\mtahiryilmazz\\Github\\GeTube\\GeTube_v2.0.0"),
+                );
+                if edit_res.changed() {
+                    self.check_getube_status();
+                }
+                if ui.button("🔍 Yeniden Tara").clicked() {
+                    self.check_getube_status();
+                }
+            });
+
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                let host_text = if self.getube_native_host_found {
+                    RichText::new("🟢 Native Host: Bulundu (bin/NativeHost.exe)")
+                        .color(theme.accent_primary())
+                } else {
+                    RichText::new("🔴 Native Host: Bulunamadı (bin/NativeHost.exe)")
+                        .color(theme.error_banner_stroke())
+                };
+                ui.label(host_text);
+
+                ui.separator();
+
+                let ext_text = if self.getube_extension_found {
+                    RichText::new("🟢 Chrome Eklentisi: Bulundu (manifest.json)")
+                        .color(theme.accent_primary())
+                } else {
+                    RichText::new("🔴 Chrome Eklentisi: Bulunamadı")
+                        .color(theme.error_banner_stroke())
+                };
+                ui.label(ext_text);
+            });
+
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                if ui
+                    .add(
+                        egui::Button::new(
+                            RichText::new("🚀 RuviTube Eklentisini Kur / Yapılandır")
+                                .strong()
+                                .color(Color32::WHITE),
+                        )
+                        .fill(theme.accent_primary())
+                        .min_size(Vec2::new(260.0, 30.0)),
+                    )
+                    .clicked()
+                {
+                    self.install_getube();
+                }
+
+                if ui.button("📂 Eklenti Klasörünü Aç (extension)").clicked() {
+                    self.open_getube_extension_dir();
+                }
+
+                if ui
+                    .button("🌐 Chrome Eklentilerini Aç (chrome://extensions)")
+                    .clicked()
+                {
+                    self.open_chrome_extensions_page();
+                }
+            });
+
+            ui.add_space(4.0);
+            ui.label(
+                RichText::new(&self.getube_status)
+                    .size(12.5)
+                    .color(theme.status_text()),
+            );
+        });
     }
 
     pub fn build_download_job(&self) -> DownloadJob {
@@ -789,11 +1153,7 @@ impl RuviStudioApp {
 impl eframe::App for RuviStudioApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if !self.theme_initialized {
-            let mut visuals = egui::Visuals::dark();
-            visuals.panel_fill = Color32::from_rgb(13, 18, 30);
-            visuals.window_fill = Color32::from_rgb(18, 25, 40);
-            visuals.extreme_bg_color = Color32::from_rgb(9, 13, 22);
-            ctx.set_visuals(visuals);
+            ctx.set_visuals(self.current_theme.visuals());
             self.theme_initialized = true;
         }
 
@@ -808,21 +1168,36 @@ impl eframe::App for RuviStudioApp {
             ui.horizontal(|ui| {
                 ui.heading(
                     RichText::new("⚡ RuviStudio")
-                        .color(Color32::from_rgb(52, 211, 153))
+                        .color(self.current_theme.accent_primary())
                         .strong(),
                 );
                 ui.label(
-                    RichText::new("Saf Rust Video Indirici (ruvid) & Native Medya Motoru (ruvic)")
-                        .color(Color32::from_rgb(156, 163, 175)),
+                    RichText::new("Saf Rust Video İndirici (ruvid) & Native Medya Motoru (ruvic)")
+                        .color(self.current_theme.text_muted()),
                 );
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    let (toggle_icon, toggle_name) = match self.current_theme {
+                        StudioTheme::Dark => ("🌙", "Koyu"),
+                        StudioTheme::Light => ("☀️", "Açık"),
+                    };
+                    if ui
+                        .button(RichText::new(format!("{toggle_icon} {toggle_name}")).strong())
+                        .clicked()
+                    {
+                        self.current_theme = match self.current_theme {
+                            StudioTheme::Dark => StudioTheme::Light,
+                            StudioTheme::Light => StudioTheme::Dark,
+                        };
+                        ctx.set_visuals(self.current_theme.visuals());
+                    }
+                    ui.separator();
                     ui.label(
                         RichText::new(format!(
-                            "Tamamlanan Is: {} | Indirilen: {:.2} MB",
+                            "Tamamlanan İş: {} | İndirilen: {:.2} MB",
                             self.telemetry.jobs_completed,
                             self.telemetry.total_bytes_downloaded as f64 / (1024.0 * 1024.0)
                         ))
-                        .color(Color32::from_rgb(56, 189, 248)),
+                        .color(self.current_theme.accent_secondary()),
                     );
                 });
             });
@@ -831,22 +1206,22 @@ impl eframe::App for RuviStudioApp {
                 ui.selectable_value(
                     &mut self.active_tab,
                     ActiveTab::Downloader,
-                    "📥 1. Video Indirici (YouTube / DASH / HLS)",
+                    "📥 1. Video İndirici (YouTube / DASH / HLS)",
                 );
                 ui.selectable_value(
                     &mut self.active_tab,
                     ActiveTab::MediaStudio,
-                    "🎬 2. Medya Studyosu (ruvic Native Motor)",
+                    "🎬 2. Medya Stüdyosu (ruvic Native Motor)",
                 );
                 ui.selectable_value(
                     &mut self.active_tab,
                     ActiveTab::PlaylistQueue,
-                    "📚 3. Playlist & Podcast Kuyrugu",
+                    "📚 3. Playlist & Podcast Kuyruğu",
                 );
                 ui.selectable_value(
                     &mut self.active_tab,
                     ActiveTab::Telemetry,
-                    "📊 4. Performans & Bellek Monitoru",
+                    "📊 4. Performans & Bellek Monitörü",
                 );
             });
             ui.add_space(4.0);
@@ -858,7 +1233,9 @@ impl eframe::App for RuviStudioApp {
                 if self.busy {
                     ui.spinner();
                 }
-                ui.label(RichText::new(&self.status_line).color(Color32::from_rgb(209, 213, 219)));
+                ui.label(
+                    RichText::new(&self.status_line).color(self.current_theme.status_text()),
+                );
             });
         });
 
@@ -866,15 +1243,15 @@ impl eframe::App for RuviStudioApp {
         egui::CentralPanel::default().show(ctx, |ui| {
             if let Some(ref err) = self.error_banner.clone() {
                 egui::Frame::NONE
-                    .fill(Color32::from_rgb(69, 18, 28))
-                    .stroke(Stroke::new(1.0_f32, Color32::from_rgb(244, 63, 94)))
+                    .fill(self.current_theme.error_banner_fill())
+                    .stroke(Stroke::new(1.0_f32, self.current_theme.error_banner_stroke()))
                     .inner_margin(8.0)
                     .corner_radius(6.0)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(
                                 RichText::new(format!("⚠ {err}"))
-                                    .color(Color32::from_rgb(253, 164, 175)),
+                                    .color(self.current_theme.error_banner_text()),
                             );
                             if ui.small_button("Kapat").clicked() {
                                 self.error_banner = None;
@@ -896,481 +1273,617 @@ impl eframe::App for RuviStudioApp {
 
 impl RuviStudioApp {
     fn render_downloader_tab(&mut self, ui: &mut egui::Ui) {
-        ui.heading("📥 YouTube / DASH 4K-8K / HLS / HTTP Indirici");
-        ui.add_space(6.0);
+        let theme = self.current_theme;
+        ui.heading("📥 YouTube / DASH 4K-8K / HLS / HTTP İndirici");
+        ui.add_space(4.0);
 
-        egui::Grid::new("dl_form_grid")
-            .num_columns(2)
-            .spacing([12.0, 8.0])
-            .striped(true)
-            .show(ui, |ui| {
+        // Card 1: URL & Stream Resolution
+        theme.render_card(ui, Some("🎯 Hedef Medya URL'si & Akış Çözümleme"), |ui| {
+            ui.horizontal(|ui| {
                 ui.label("Medya / YouTube URL:");
-                ui.horizontal(|ui| {
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.url_input)
-                            .desired_width(480.0)
-                            .hint_text("https://www.youtube.com/watch?v=..."),
-                    );
-                    if ui
-                        .add_enabled(!self.busy, egui::Button::new("🔍 Akislari Cozumle (Info)"))
-                        .clicked()
-                    {
-                        self.spawn_resolve_source();
-                    }
-                });
-                ui.end_row();
-
-                ui.label("Cikti Sablonu / Dosya:");
                 ui.add(
-                    egui::TextEdit::singleline(&mut self.output_path_input)
-                        .desired_width(480.0)
-                        .hint_text("./downloads/%(title)s.%(ext)s"),
+                    egui::TextEdit::singleline(&mut self.url_input)
+                        .desired_width(460.0)
+                        .hint_text("https://www.youtube.com/watch?v=..."),
                 );
-                ui.end_row();
-
-                ui.label("Format / Cozunurluk:");
-                ui.horizontal(|ui| {
-                    for preset in [
-                        "best", "4320p", "2160p", "1080p", "720p", "360p", "240p", "worst",
-                    ] {
-                        ui.selectable_value(&mut self.format_spec, preset.to_string(), preset);
-                    }
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.format_spec)
-                            .desired_width(100.0)
-                            .hint_text("itag-137"),
-                    );
-                });
-                ui.end_row();
-
-                ui.label("Paralel Range Parcalari (--jobs):");
-                ui.horizontal(|ui| {
-                    ui.add(egui::Slider::new(&mut self.jobs_count, 1..=16).suffix(" parca"));
-                    ui.checkbox(&mut self.resume_enabled, "Resume Checkpoint");
-                    ui.checkbox(&mut self.overwrite_enabled, "Uzerine Yaz (--overwrite)");
-                });
-                ui.end_row();
-
-                ui.label("Altyazi & Dublaj Ses:");
-                ui.horizontal(|ui| {
-                    ui.checkbox(&mut self.download_subtitles, "Altyazilari Indir");
-                    ui.checkbox(&mut self.auto_subtitles, "Otomatik (ASR)");
-                    ui.label("Format:");
-                    for fmt in ["srt", "vtt", "sbv"] {
-                        ui.selectable_value(&mut self.subtitle_format, fmt.to_string(), fmt);
-                    }
-                    ui.label("Altyazi Dili:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.subtitle_lang)
-                            .desired_width(48.0)
-                            .hint_text("tr/en"),
-                    );
-                    ui.label("Ses Dili (--audio-lang):");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.audio_lang)
-                            .desired_width(48.0)
-                            .hint_text("tr/en"),
-                    );
-                });
-                ui.end_row();
-
-                ui.label("Bolumler (Chapters) & Klip:");
-                ui.horizontal(|ui| {
-                    ui.checkbox(
-                        &mut self.split_chapters,
-                        "Bolumleri Ayri Dosyalara Bol (--split-chapters)",
-                    );
-                    ui.label("Baslangic:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.clip_start)
-                            .desired_width(68.0)
-                            .hint_text("00:00:10"),
-                    );
-                    ui.label("Bitis:");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.clip_end)
-                            .desired_width(68.0)
-                            .hint_text("00:00:25"),
-                    );
-                    ui.label("Sure (sn):");
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.clip_duration)
-                            .desired_width(50.0)
-                            .hint_text("15"),
-                    );
-                });
-                ui.end_row();
+                if ui
+                    .add_enabled(!self.busy, egui::Button::new("🔍 Akışları Çözümle (Info)"))
+                    .clicked()
+                {
+                    self.spawn_resolve_source();
+                }
             });
-
-        ui.add_space(10.0);
-        if ui
-            .add_enabled(
-                !self.busy,
-                egui::Button::new(
-                    RichText::new("🚀 Paralel Indirmeyi Baslat (ruvid + Otomatik DASH Remux)")
-                        .size(16.0)
-                        .strong(),
-                )
-                .min_size(Vec2::new(360.0, 36.0)),
-            )
-            .clicked()
-        {
-            self.spawn_download();
-        }
-
-        if let Some(ref outcome) = self.last_download {
-            ui.add_space(10.0);
-            ui.separator();
+            ui.add_space(2.0);
             ui.label(
-                RichText::new(format!(
-                    "✅ Son Indirme: {} [{}] — {} bayt ({} Range parcasi) -> {}",
-                    outcome.title,
-                    outcome.stream_id,
-                    outcome.bytes_downloaded,
-                    outcome.chunks_total,
-                    outcome.output_path
-                ))
-                .color(Color32::from_rgb(52, 211, 153)),
+                RichText::new("Desteklenen: YouTube (Innertube iOS/DASH), HLS .m3u8, DASH .mpd, Direkt HTTP/HTTPS")
+                    .size(11.5)
+                    .color(theme.text_muted()),
             );
-            if !outcome.subtitles.is_empty() {
-                ui.label(format!(
-                    "📝 Indirilen Altyazilar ({}): {}",
-                    outcome.subtitles.len(),
-                    outcome
-                        .subtitles
-                        .iter()
-                        .map(|s| format!("{} ({})", s.language, s.path))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                ));
-            }
-            if !outcome.chapters.is_empty() {
-                ui.label(format!(
-                    "✂ Bolunen Chapter Dosyalari ({}): {}",
-                    outcome.chapters.len(),
-                    outcome.chapters.join(", ")
-                ));
-            }
-        }
+        });
+        ui.add_space(8.0);
 
-        if let Some(ref source) = self.resolved_source.clone() {
-            ui.add_space(12.0);
-            ui.separator();
-            ui.heading(format!("📺 Cozulen Kaynak: {}", source.title));
-            ui.label(format!(
-                "Akis Sayisi: {} | Altyazi: {} | Bolumler (Chapters): {}",
-                source.streams.len(),
-                source.subtitles.len(),
-                source.chapters.len()
-            ));
-
-            egui::Grid::new("resolved_streams_grid")
-                .num_columns(7)
+        // Card 2: Format & Download Options
+        theme.render_card(ui, Some("⚙️ Format, Kalite & Paralel İndirme Seçenekleri"), |ui| {
+            egui::Grid::new("dl_format_opts_grid")
+                .num_columns(2)
+                .spacing([12.0, 8.0])
                 .striped(true)
-                .spacing([12.0, 4.0])
                 .show(ui, |ui| {
-                    ui.strong("Sec");
-                    ui.strong("Akis ID");
-                    ui.strong("Tur");
-                    ui.strong("Kapsayici");
-                    ui.strong("Cozunurluk / FPS");
-                    ui.strong("Kodek & Dil");
-                    ui.strong("Bit Hizi");
+                    ui.label("Çıktı Şablonu / Dosya:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.output_path_input)
+                            .desired_width(460.0)
+                            .hint_text("./downloads/%(title)s.%(ext)s"),
+                    );
                     ui.end_row();
 
-                    for s in &source.streams {
-                        if ui.small_button("Kullan").clicked() {
-                            self.format_spec = s.id.clone();
+                    ui.label("Format / Çözünürlük:");
+                    ui.horizontal(|ui| {
+                        for preset in [
+                            "best", "4320p", "2160p", "1080p", "720p", "360p", "240p", "worst",
+                        ] {
+                            ui.selectable_value(&mut self.format_spec, preset.to_string(), preset);
                         }
-                        ui.label(&s.id);
-                        ui.label(format!("{:?}", s.kind));
-                        ui.label(&s.container);
-                        let res = match (s.width, s.height) {
-                            (Some(w), Some(h)) => {
-                                format!(
-                                    "{}x{} ({}fps)",
-                                    w,
-                                    h,
-                                    s.frame_rate.as_deref().unwrap_or("30")
-                                )
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.format_spec)
+                                .desired_width(90.0)
+                                .hint_text("itag-137"),
+                        );
+                    });
+                    ui.end_row();
+
+                    ui.label("Paralel Range Parçaları (--jobs):");
+                    ui.horizontal(|ui| {
+                        ui.add(egui::Slider::new(&mut self.jobs_count, 1..=16).suffix(" parça"));
+                        ui.checkbox(&mut self.resume_enabled, "Resume Checkpoint");
+                        ui.checkbox(&mut self.overwrite_enabled, "Üzerine Yaz (--overwrite)");
+                    });
+                    ui.end_row();
+                });
+        });
+        ui.add_space(8.0);
+
+        // Card 3: Subtitles, Audio & Clip Settings
+        theme.render_card(ui, Some("✂️ Altyazı, Dublaj Ses & Klip Parametreleri"), |ui| {
+            egui::Grid::new("dl_sub_clip_grid")
+                .num_columns(2)
+                .spacing([12.0, 8.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    ui.label("Altyazı & Dublaj Ses:");
+                    ui.horizontal(|ui| {
+                        ui.checkbox(&mut self.download_subtitles, "Altyazıları İndir");
+                        ui.checkbox(&mut self.auto_subtitles, "Otomatik (ASR)");
+                        ui.label("Format:");
+                        for fmt in ["srt", "vtt", "sbv"] {
+                            ui.selectable_value(&mut self.subtitle_format, fmt.to_string(), fmt);
+                        }
+                        ui.label("Altyazı Dili:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.subtitle_lang)
+                                .desired_width(48.0)
+                                .hint_text("tr/en"),
+                        );
+                        ui.label("Ses Dili (--audio-lang):");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.audio_lang)
+                                .desired_width(48.0)
+                                .hint_text("tr/en"),
+                        );
+                    });
+                    ui.end_row();
+
+                    ui.label("Bölümler & Klip Aralığı:");
+                    ui.horizontal(|ui| {
+                        ui.checkbox(
+                            &mut self.split_chapters,
+                            "Bölümleri Ayrı Dosyalara Böl (--split-chapters)",
+                        );
+                        ui.label("Başlangıç:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.clip_start)
+                                .desired_width(68.0)
+                                .hint_text("00:00:10"),
+                        );
+                        ui.label("Bitiş:");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.clip_end)
+                                .desired_width(68.0)
+                                .hint_text("00:00:25"),
+                        );
+                        ui.label("Süre (sn):");
+                        ui.add(
+                            egui::TextEdit::singleline(&mut self.clip_duration)
+                                .desired_width(50.0)
+                                .hint_text("15"),
+                        );
+                    });
+                    ui.end_row();
+                });
+        });
+        ui.add_space(10.0);
+
+        // Primary Action Button
+        ui.horizontal(|ui| {
+            if ui
+                .add_enabled(
+                    !self.busy,
+                    egui::Button::new(
+                        RichText::new("🚀 Paralel İndirmeyi Başlat (ruvid + Otomatik DASH Remux)")
+                            .size(16.0)
+                            .strong(),
+                    )
+                    .min_size(Vec2::new(380.0, 38.0)),
+                )
+                .clicked()
+            {
+                self.spawn_download();
+            }
+        });
+        ui.add_space(10.0);
+
+        // RuviTube Setup Card
+        self.render_ruvitube_setup_card(ui);
+
+        // Dynamic Outcome Card
+        if let Some(outcome) = self.last_download.clone() {
+            ui.add_space(8.0);
+            theme.render_card(ui, Some("✅ Son İndirme Özeti"), |ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "{} [{}] — {} bayt ({} Range parçası) -> {}",
+                        outcome.title,
+                        outcome.stream_id,
+                        outcome.bytes_downloaded,
+                        outcome.chunks_total,
+                        outcome.output_path
+                    ))
+                    .color(theme.accent_primary())
+                    .strong(),
+                );
+                if !outcome.subtitles.is_empty() {
+                    ui.add_space(4.0);
+                    ui.label(format!(
+                        "📝 İndirilen Altyazılar ({}): {}",
+                        outcome.subtitles.len(),
+                        outcome
+                            .subtitles
+                            .iter()
+                            .map(|s| format!("{} ({})", s.language, s.path))
+                            .collect::<Vec<_>>()
+                            .join(", ")
+                    ));
+                }
+                if !outcome.chapters.is_empty() {
+                    ui.add_space(4.0);
+                    ui.label(format!(
+                        "✂ Bölünen Chapter Dosyaları ({}): {}",
+                        outcome.chapters.len(),
+                        outcome.chapters.join(", ")
+                    ));
+                }
+            });
+        }
+
+        // Dynamic Streams Card
+        if let Some(source) = self.resolved_source.clone() {
+            ui.add_space(8.0);
+            let title_str = format!("📺 Çözülen Kaynak: {}", source.title);
+            theme.render_card(ui, Some(&title_str), |ui| {
+                ui.label(format!(
+                    "Akış Sayısı: {} | Altyazı: {} | Bölümler (Chapters): {}",
+                    source.streams.len(),
+                    source.subtitles.len(),
+                    source.chapters.len()
+                ));
+                ui.add_space(6.0);
+
+                egui::Grid::new("resolved_streams_grid")
+                    .num_columns(7)
+                    .striped(true)
+                    .spacing([12.0, 4.0])
+                    .show(ui, |ui| {
+                        ui.strong("Seç");
+                        ui.strong("Akış ID");
+                        ui.strong("Tür");
+                        ui.strong("Kapsayıcı");
+                        ui.strong("Çözünürlük / FPS");
+                        ui.strong("Kodek & Dil");
+                        ui.strong("Bit Hızı");
+                        ui.end_row();
+
+                        for s in &source.streams {
+                            if ui.small_button("Kullan").clicked() {
+                                self.format_spec = s.id.clone();
                             }
-                            _ => "-".to_string(),
-                        };
-                        ui.label(res);
-                        ui.label(format!(
-                            "{}{}",
-                            s.codecs.as_deref().unwrap_or("-"),
-                            s.language
+                            ui.label(&s.id);
+                            ui.label(format!("{:?}", s.kind));
+                            ui.label(&s.container);
+                            let res = match (s.width, s.height) {
+                                (Some(w), Some(h)) => {
+                                    format!(
+                                        "{}x{} ({}fps)",
+                                        w,
+                                        h,
+                                        s.frame_rate.as_deref().unwrap_or("30")
+                                    )
+                                }
+                                _ => "-".to_string(),
+                            };
+                            ui.label(res);
+                            ui.label(format!(
+                                "{}{}",
+                                s.codecs.as_deref().unwrap_or("-"),
+                                s.language
                                 .as_deref()
                                 .map(|l| format!(" [{l}]"))
                                 .unwrap_or_default()
-                        ));
-                        ui.label(
-                            s.bandwidth_bps
-                                .map(|b| format!("{} kbps", b / 1000))
-                                .unwrap_or_else(|| "-".to_string()),
-                        );
-                        ui.end_row();
-                    }
-                });
+                            ));
+                            ui.label(
+                                s.bandwidth_bps
+                                    .map(|b| format!("{} kbps", b / 1000))
+                                    .unwrap_or_else(|| "-".to_string()),
+                            );
+                            ui.end_row();
+                        }
+                    });
+            });
         }
     }
 
     fn render_media_studio_tab(&mut self, ui: &mut egui::Ui) {
-        ui.heading("🎬 ruvic Saf Rust Native Medya Motoru (Sifir FFmpeg Bagimliligi)");
+        let theme = self.current_theme;
+        ui.heading("🎬 ruvic Saf Rust Native Medya Motoru (Sıfır FFmpeg Bağımlılığı)");
         ui.label(
             RichText::new(
-                "Seek tabanli 64KB/1MB Streaming I/O · MP4 stco/co64 Offset Rebasing · ADTS AAC & M4A Demux · 360/VR & HDR Koruma",
+                "Seek tabanlı 64KB/1MB Streaming I/O · MP4 stco/co64 Offset Rebasing · ADTS AAC & M4A Demux · 360/VR & HDR Koruma",
             )
-            .color(Color32::from_rgb(156, 163, 175)),
+            .color(theme.text_muted()),
         );
         ui.add_space(8.0);
 
-        egui::Grid::new("media_studio_grid")
-            .num_columns(2)
-            .spacing([12.0, 8.0])
-            .striped(true)
-            .show(ui, |ui| {
-                ui.label("Girdi Medya Dosyasi:");
-                ui.horizontal(|ui| {
-                    ui.add(
-                        egui::TextEdit::singleline(&mut self.media_input_path)
-                            .desired_width(440.0)
-                            .hint_text("./downloads/video.mp4"),
-                    );
-                    if ui
-                        .add_enabled(!self.busy, egui::Button::new("🔍 Yokla (Probe)"))
-                        .clicked()
-                    {
-                        self.spawn_probe_media();
-                    }
-                });
-                ui.end_row();
-
-                ui.label("Ikincil Ses Dosyasi (Opsiyonel DASH Mux):");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.media_secondary_audio_path)
-                        .desired_width(440.0)
-                        .hint_text("Bos birakilabilir veya ayrık ses dosyasi (.m4a / .webm)"),
-                );
-                ui.end_row();
-
-                ui.label("Islem Turu:");
-                ui.horizontal_wrapped(|ui| {
-                    for kind in [
-                        MediaOperationKind::RemuxFaststart,
-                        MediaOperationKind::TrimRange,
-                        MediaOperationKind::ExtractAudioAac,
-                        MediaOperationKind::ExtractAudioM4a,
-                        MediaOperationKind::Thumbnail,
-                    ] {
-                        ui.selectable_value(&mut self.media_op, kind, kind.label());
-                    }
-                });
-                ui.end_row();
-
-                if self.media_op == MediaOperationKind::TrimRange {
-                    ui.label("Trim Baslangic & Sure (sn):");
+        // Card 1: Input & Probe
+        theme.render_card(ui, Some("📁 Girdi Medyası & Akış Yoklama (Probe)"), |ui| {
+            egui::Grid::new("media_studio_input_grid")
+                .num_columns(2)
+                .spacing([12.0, 8.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    ui.label("Girdi Medya Dosyası:");
                     ui.horizontal(|ui| {
                         ui.add(
-                            egui::TextEdit::singleline(&mut self.trim_start).desired_width(90.0),
+                            egui::TextEdit::singleline(&mut self.media_input_path)
+                                .desired_width(440.0)
+                                .hint_text("./downloads/video.mp4"),
                         );
-                        ui.add(
-                            egui::Slider::new(&mut self.trim_duration, 0.5..=600.0).suffix(" sn"),
-                        );
+                        if ui
+                            .add_enabled(!self.busy, egui::Button::new("🔍 Yokla (Probe)"))
+                            .clicked()
+                        {
+                            self.spawn_probe_media();
+                        }
                     });
                     ui.end_row();
-                } else if self.media_op == MediaOperationKind::Thumbnail {
-                    ui.label("Kucuk Resim Zamani (--at):");
-                    ui.add(egui::TextEdit::singleline(&mut self.thumbnail_at).desired_width(90.0));
+
+                    ui.label("İkincil Ses Dosyası (DASH Mux):");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.media_secondary_audio_path)
+                            .desired_width(440.0)
+                            .hint_text("Boş bırakılabilir veya ayrık ses dosyası (.m4a / .webm)"),
+                    );
                     ui.end_row();
-                }
+                });
+        });
+        ui.add_space(8.0);
 
-                ui.label("Cikti Dosya Yolu:");
-                ui.add(
-                    egui::TextEdit::singleline(&mut self.media_output_path)
-                        .desired_width(440.0)
-                        .hint_text("./downloads/output.mp4"),
-                );
-                ui.end_row();
-            });
+        // Card 2: Operation & Parameters
+        theme.render_card(ui, Some("⚡ ruvic Native İşlem Seçimi & Parametreler"), |ui| {
+            egui::Grid::new("media_studio_op_grid")
+                .num_columns(2)
+                .spacing([12.0, 8.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    ui.label("İşlem Türü:");
+                    ui.horizontal_wrapped(|ui| {
+                        for kind in [
+                            MediaOperationKind::RemuxFaststart,
+                            MediaOperationKind::TrimRange,
+                            MediaOperationKind::ExtractAudioAac,
+                            MediaOperationKind::ExtractAudioM4a,
+                            MediaOperationKind::Thumbnail,
+                        ] {
+                            ui.selectable_value(&mut self.media_op, kind, kind.label());
+                        }
+                    });
+                    ui.end_row();
 
+                    if self.media_op == MediaOperationKind::TrimRange {
+                        ui.label("Trim Başlangıç & Süre (sn):");
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                egui::TextEdit::singleline(&mut self.trim_start).desired_width(90.0),
+                            );
+                            ui.add(
+                                egui::Slider::new(&mut self.trim_duration, 0.5..=600.0).suffix(" sn"),
+                            );
+                        });
+                        ui.end_row();
+                    } else if self.media_op == MediaOperationKind::Thumbnail {
+                        ui.label("Küçük Resim Zamanı (--at):");
+                        ui.add(egui::TextEdit::singleline(&mut self.thumbnail_at).desired_width(90.0));
+                        ui.end_row();
+                    }
+
+                    ui.label("Çıktı Dosya Yolu:");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut self.media_output_path)
+                            .desired_width(440.0)
+                            .hint_text("./downloads/output.mp4"),
+                    );
+                    ui.end_row();
+                });
+        });
         ui.add_space(10.0);
+
+        // Action button
         if ui
             .add_enabled(
                 !self.busy,
                 egui::Button::new(
-                    RichText::new("⚡ Saf Rust Native Motor Ile Isle")
+                    RichText::new("⚡ Saf Rust Native Motor İle İşle")
                         .size(16.0)
                         .strong(),
                 )
-                .min_size(Vec2::new(300.0, 36.0)),
+                .min_size(Vec2::new(320.0, 38.0)),
             )
             .clicked()
         {
             self.spawn_media_operation();
         }
 
-        if let Some(ref info) = self.probed_info {
-            ui.add_space(12.0);
-            ui.separator();
-            ui.heading(format!(
+        // Dynamic Result Card
+        if let Some(res) = self.last_media_op.clone() {
+            ui.add_space(10.0);
+            theme.render_card(ui, Some("🎉 İşlem Tamamlandı"), |ui| {
+                ui.label(
+                    RichText::new(format!(
+                        "Çıktı: {} — {} bayt ({} ms)",
+                        res.output,
+                        res.output_size_bytes,
+                        res.duration_ms
+                    ))
+                    .color(theme.accent_primary())
+                    .strong(),
+                );
+            });
+        }
+
+        // Dynamic Probed Info Card
+        if let Some(info) = self.probed_info.clone() {
+            ui.add_space(10.0);
+            let info_title = format!(
                 "🔍 Konteyner Analizi: {} ({})",
                 info.container.format_name,
                 info.container.format_long_name.as_deref().unwrap_or("-")
-            ));
-            ui.label(format!(
-                "Sure: {:.2} sn | Boyut: {} B | Bit Hizi: {} bps",
-                info.container.duration_seconds.unwrap_or(0.0),
-                info.container.size_bytes.unwrap_or(0),
-                info.container.bit_rate.unwrap_or(0)
-            ));
-            for s in &info.streams {
-                let hdr_badge = if s.color_primaries.is_some() || s.mastering_display.is_some() {
-                    " [HDR colr/mdcv]"
-                } else {
-                    ""
-                };
-                let vr_badge = if s.spatial_360.is_some() {
-                    " [360° VR sv3d]"
-                } else {
-                    ""
-                };
+            );
+            theme.render_card(ui, Some(&info_title), |ui| {
                 ui.label(format!(
-                    "  • Stream #{}: {:?} | Kodek: {} | {:?}x{:?} | {:?} Hz{hdr_badge}{vr_badge}",
-                    s.index, s.kind, s.codec_name, s.width, s.height, s.sample_rate
+                    "Süre: {:.2} sn | Boyut: {} B | Bit Hızı: {} bps",
+                    info.container.duration_seconds.unwrap_or(0.0),
+                    info.container.size_bytes.unwrap_or(0),
+                    info.container.bit_rate.unwrap_or(0)
                 ));
-            }
+                ui.add_space(4.0);
+                for s in &info.streams {
+                    let hdr_badge = if s.color_primaries.is_some() || s.mastering_display.is_some() {
+                        " [HDR colr/mdcv]"
+                    } else {
+                        ""
+                    };
+                    let vr_badge = if s.spatial_360.is_some() {
+                        " [360° VR sv3d]"
+                    } else {
+                        ""
+                    };
+                    ui.label(format!(
+                        "  • Stream #{}: {:?} | Kodek: {} | {:?}x{:?} | {:?} Hz{hdr_badge}{vr_badge}",
+                        s.index, s.kind, s.codec_name, s.width, s.height, s.sample_rate
+                    ));
+                }
+            });
         }
     }
 
     fn render_playlist_tab(&mut self, ui: &mut egui::Ui) {
-        ui.heading("📚 Toplu Playlist, Dizi ve Podcast Indirici");
+        let theme = self.current_theme;
+        ui.heading("📚 Toplu Playlist, Dizi ve Podcast İndirici");
         ui.add_space(6.0);
-        ui.horizontal(|ui| {
-            ui.label("Playlist / Podcast RSS / M3U URL:");
-            ui.add(
-                egui::TextEdit::singleline(&mut self.playlist_url)
-                    .desired_width(420.0)
-                    .hint_text("https://www.youtube.com/playlist?list=..."),
-            );
-            if ui
-                .add_enabled(!self.busy, egui::Button::new("📋 Listeyi Cozumle"))
-                .clicked()
-            {
-                self.spawn_resolve_playlist();
-            }
-        });
 
-        ui.horizontal(|ui| {
-            ui.label("Cikti Klasoru:");
-            ui.add(egui::TextEdit::singleline(&mut self.playlist_output_dir).desired_width(280.0));
-            ui.add(
-                egui::Slider::new(&mut self.playlist_concurrency, 1..=8).text("Eszamanli Indirme"),
-            );
-            ui.checkbox(
-                &mut self.playlist_skip_errors,
-                "Hatalari Atla (--skip-errors)",
-            );
-        });
-
-        ui.add_space(8.0);
-        if !self.playlist_entries.is_empty() {
-            if ui
-                .add_enabled(
-                    !self.busy,
-                    egui::Button::new(RichText::new("📥 Secilen Ogeleri Indir").strong()),
-                )
-                .clicked()
-            {
-                self.spawn_download_playlist();
-            }
-            ui.add_space(6.0);
-            for (checked, entry) in &mut self.playlist_entries {
-                ui.checkbox(
-                    checked,
-                    format!(
-                        "#{:03} — {} ({})",
-                        entry.index,
-                        entry.title.as_deref().unwrap_or("Basliksiz"),
-                        entry.url
-                    ),
+        // Card 1: Playlist & RSS Config
+        theme.render_card(ui, Some("📚 Playlist / RSS / M3U Kaynak Ayarları"), |ui| {
+            ui.horizontal(|ui| {
+                ui.label("Playlist / RSS / M3U URL:");
+                ui.add(
+                    egui::TextEdit::singleline(&mut self.playlist_url)
+                        .desired_width(440.0)
+                        .hint_text("https://www.youtube.com/playlist?list=..."),
                 );
-            }
+                if ui
+                    .add_enabled(!self.busy, egui::Button::new("📋 Listeyi Çözümle"))
+                    .clicked()
+                {
+                    self.spawn_resolve_playlist();
+                }
+            });
+            ui.add_space(6.0);
+            ui.horizontal(|ui| {
+                ui.label("Çıktı Klasörü:");
+                ui.add(egui::TextEdit::singleline(&mut self.playlist_output_dir).desired_width(260.0));
+                ui.add(
+                    egui::Slider::new(&mut self.playlist_concurrency, 1..=8).text("Eşzamanlı İndirme"),
+                );
+                ui.checkbox(
+                    &mut self.playlist_skip_errors,
+                    "Hataları Atla (--skip-errors)",
+                );
+            });
+        });
+        ui.add_space(8.0);
+
+        // Card 2: Queued Items & Batch Download
+        if !self.playlist_entries.is_empty() {
+            theme.render_card(ui, Some("📋 Kuyruktaki İçerikler & Toplu İndirme"), |ui| {
+                ui.horizontal(|ui| {
+                    if ui
+                        .add_enabled(
+                            !self.busy,
+                            egui::Button::new(
+                                RichText::new("📥 Seçilen Öğeleri İndir")
+                                    .strong()
+                                    .color(Color32::WHITE),
+                            )
+                            .fill(theme.accent_primary())
+                            .min_size(Vec2::new(200.0, 32.0)),
+                        )
+                        .clicked()
+                    {
+                        self.spawn_download_playlist();
+                    }
+
+                    if ui.button("Tümünü Seç").clicked() {
+                        for (checked, _) in &mut self.playlist_entries {
+                            *checked = true;
+                        }
+                    }
+                    if ui.button("Seçimi Kaldır").clicked() {
+                        for (checked, _) in &mut self.playlist_entries {
+                            *checked = false;
+                        }
+                    }
+                });
+                ui.add_space(8.0);
+                ui.separator();
+                ui.add_space(4.0);
+
+                for (checked, entry) in &mut self.playlist_entries {
+                    ui.checkbox(
+                        checked,
+                        format!(
+                            "#{:03} — {} ({})",
+                            entry.index,
+                            entry.title.as_deref().unwrap_or("Başlıksız"),
+                            entry.url
+                        ),
+                    );
+                }
+            });
         }
     }
 
     fn render_telemetry_tab(&mut self, ui: &mut egui::Ui) {
-        ui.heading("📊 Performans, Bellek Yuku ve Piyasa Kiyaslama Panosu");
+        let theme = self.current_theme;
+        ui.heading("📊 Performans, Bellek Yükü ve Piyasa Kıyaslama Panosu");
         ui.add_space(6.0);
 
         ui.columns(3, |cols| {
-            cols[0].group(|ui| {
-                ui.label(RichText::new("UYGULAMA BOYUTU (SIFIR BAGIMLILIK)").strong());
+            theme.render_card(&mut cols[0], Some("UYGULAMA BOYUTU (SIFIR BAĞIMLILIK)"), |ui| {
                 ui.heading(
                     RichText::new("ruvid: 6.87 MB | ruvic: 3.73 MB")
-                        .color(Color32::from_rgb(52, 211, 153)),
+                        .color(theme.accent_primary()),
                 );
-                ui.label("Piyasa Yigini (yt-dlp + deno + ffmpeg): ~360 MB (~34x daha kucuk)");
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("Piyasa Yığını (yt-dlp + deno + ffmpeg): ~360 MB (~34x daha küçük)")
+                        .color(theme.text_muted()),
+                );
             });
-            cols[1].group(|ui| {
-                ui.label(RichText::new("50.3 MB MP4 STREAMING BELLEK KANITI").strong());
+
+            theme.render_card(&mut cols[1], Some("50.3 MB MP4 STREAMING BELLEK"), |ui| {
                 ui.heading(
-                    RichText::new("3.53 MB Ozel RAM (42.36 ms)")
-                        .color(Color32::from_rgb(56, 189, 248)),
+                    RichText::new("3.53 MB Özel RAM (42.36 ms)")
+                        .color(theme.accent_secondary()),
                 );
-                ui.label("Aktarim Hizi: ~1,187 MB/sn (PeakWorkingSet: 8.98 MB — %7)");
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("Aktarım Hızı: ~1,187 MB/sn (PeakWorkingSet: 8.98 MB — %7)")
+                        .color(theme.text_muted()),
+                );
             });
-            cols[2].group(|ui| {
-                ui.label(RichText::new("SISTEM BUTUNLUGU & TESTLER").strong());
+
+            theme.render_card(&mut cols[2], Some("SİSTEM BÜTÜNLÜĞÜ & TESTLER"), |ui| {
                 ui.heading(
-                    RichText::new("209+ Test Yesil | Exit 8 Koruma")
-                        .color(Color32::from_rgb(167, 139, 250)),
+                    RichText::new("209+ Test Yeşil | Exit 8 Koruma")
+                        .color(theme.accent_purple()),
                 );
-                ui.label("Atomik .part/.ruvic-tmp yazim + validate_moov_integrity");
+                ui.add_space(4.0);
+                ui.label(
+                    RichText::new("Atomik .part/.ruvic-tmp yazım + validate_moov_integrity")
+                        .color(theme.text_muted()),
+                );
             });
         });
 
         ui.add_space(12.0);
-        ui.subheading_bar("Gercek Zamanli Oturum Islem Gecmisi");
         if self.telemetry.history.is_empty() {
-            ui.label("Henuz bu oturumda bir indirme veya medya islemi calistirilmadi.");
+            theme.render_card(ui, Some("⏱ Gerçek Zamanlı Oturum İşlem Geçmişi"), |ui| {
+                ui.label(
+                    RichText::new("Henüz bu oturumda bir indirme veya medya işlemi çalıştırılmadı.")
+                        .color(theme.text_muted()),
+                );
+            });
         } else {
-            egui::Grid::new("telemetry_history_grid")
-                .num_columns(5)
-                .striped(true)
-                .spacing([16.0, 6.0])
-                .show(ui, |ui| {
-                    ui.strong("Islem");
-                    ui.strong("Sure (ms)");
-                    ui.strong("Islenen Boyut");
-                    ui.strong("Parca / Akis");
-                    ui.strong("Detay / Cikti");
-                    ui.end_row();
-
-                    for item in self.telemetry.history.iter().rev() {
-                        ui.label(&item.task_name);
-                        ui.label(format!("{:.2} ms", item.elapsed_ms));
-                        ui.label(format!("{} B", item.bytes_processed));
-                        ui.label(format!("{}", item.chunks));
-                        ui.label(&item.detail);
-                        ui.end_row();
+            let mut clear_history = false;
+            let history_items = self.telemetry.history.clone();
+            theme.render_card(ui, Some("⏱ Gerçek Zamanlı Oturum İşlem Geçmişi"), |ui| {
+                ui.horizontal(|ui| {
+                    if ui.button("Geçmişi Temizle").clicked() {
+                        clear_history = true;
                     }
                 });
+                ui.add_space(4.0);
+
+                egui::Grid::new("telemetry_history_grid")
+                    .num_columns(5)
+                    .striped(true)
+                    .spacing([16.0, 6.0])
+                    .show(ui, |ui| {
+                        ui.strong("İşlem");
+                        ui.strong("Süre (ms)");
+                        ui.strong("İşlenen Boyut");
+                        ui.strong("Parça / Akış");
+                        ui.strong("Detay / Çıktı");
+                        ui.end_row();
+
+                        for item in history_items.iter().rev() {
+                            ui.label(&item.task_name);
+                            ui.label(format!("{:.2} ms", item.elapsed_ms));
+                            ui.label(format!("{} B", item.bytes_processed));
+                            ui.label(format!("{}", item.chunks));
+                            ui.label(&item.detail);
+                            ui.end_row();
+                        }
+                    });
+            });
+            if clear_history {
+                self.telemetry.history.clear();
+            }
         }
+
+        ui.add_space(8.0);
+        self.render_ruvitube_setup_card(ui);
     }
 }
 
-trait UiSubheadingExt {
-    fn subheading_bar(&mut self, text: &str);
+pub trait UiSubheadingExt {
+    fn subheading_bar(&mut self, text: &str, theme: StudioTheme);
 }
 
 impl UiSubheadingExt for egui::Ui {
-    fn subheading_bar(&mut self, text: &str) {
+    fn subheading_bar(&mut self, text: &str, theme: StudioTheme) {
         self.label(
             RichText::new(text)
                 .size(15.0)
-                .color(Color32::from_rgb(56, 189, 248))
+                .color(theme.accent_secondary())
                 .strong(),
         );
         self.separator();

@@ -46,7 +46,7 @@ pub struct NetworkConfig {
 impl Default for NetworkConfig {
     fn default() -> Self {
         Self {
-            user_agent: format!("RUVID/{}", env!("CARGO_PKG_VERSION")),
+            user_agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36".to_string(),
             connect_timeout_seconds: 10,
             limit_rate: String::new(),
             proxy: None,

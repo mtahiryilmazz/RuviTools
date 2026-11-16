@@ -1,7 +1,7 @@
 use reqwest::StatusCode;
 use reqwest::header::{
     ACCEPT_RANGES, CONTENT_DISPOSITION, CONTENT_LENGTH, CONTENT_RANGE, CONTENT_TYPE, ETAG,
-    LAST_MODIFIED, RANGE,
+    LAST_MODIFIED,
 };
 use tokio_util::sync::CancellationToken;
 use url::Url;
@@ -33,18 +33,10 @@ pub async fn probe_http_resource(
     run_with_retry(ctx.retry_count, &cancel, || {
         let parsed_c = parsed.clone();
         async move {
-            // Controlled GET with Range: bytes=0-0 (avoids unreliable HEAD behavior on some servers)
-            let resp = ctx
-                .client
-                .get(parsed_c.clone())
-                .header(RANGE, "bytes=0-0")
-                .send()
-                .await
-                .map_err(RetryableError::from_reqwest)?;
-
-            let final_url = resp.url().clone();
-            validate_url_security(&final_url, ctx.allow_private_net)
-                .map_err(RetryableError::Permanent)?;
+            // Controlled GET with Range: bytes=0-0 preserving range headers across redirects
+            let (resp, final_url) = ctx
+                .get_with_range_following_redirects(&parsed_c, "bytes=0-0")
+                .await?;
 
             let status = resp.status();
             if status == StatusCode::RANGE_NOT_SATISFIABLE

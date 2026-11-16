@@ -1,0 +1,141 @@
+<!doctype html>
+<html lang="tr">
+<head>
+  <meta charset="utf-8">
+  <title>RuviTube</title>
+  <style>
+    :root {
+      --bg: #141414;
+      --panel: #1f1f1f;
+      --line: #333;
+      --text: #f1f1f1;
+      --muted: #a0a0a0;
+      --accent: #cc0000;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font: 14px/1.5 "Segoe UI", Roboto, Arial, sans-serif;
+    }
+    .wrap { max-width: 720px; margin: 0 auto; padding: 32px 20px 64px; }
+    header { display: flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+    header img { width: 28px; height: 28px; }
+    h1 { font-size: 19px; margin: 0; font-weight: 600; }
+    .version { color: var(--muted); font-size: 12px; margin-bottom: 24px; }
+    section {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 16px 18px;
+      margin-bottom: 14px;
+    }
+    h2 { font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 12px; }
+    .row { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 7px 0; }
+    .row + .row { border-top: 1px solid #2a2a2a; }
+    .label { display: flex; flex-direction: column; }
+    .label small { color: var(--muted); font-size: 11.5px; }
+    select, input[type=number] {
+      background: #121212;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      color: var(--text);
+      padding: 7px 10px;
+      font: inherit;
+      min-width: 130px;
+    }
+    select:focus, input[type=number]:focus { outline: none; border-color: var(--accent); }
+    .switch { position: relative; width: 42px; height: 24px; flex: 0 0 auto; }
+    .switch input { position: absolute; opacity: 0; width: 100%; height: 100%; margin: 0; cursor: pointer; }
+    .track {
+      position: absolute; inset: 0;
+      background: #3a3a3a; border-radius: 999px; transition: background .18s;
+      pointer-events: none;
+    }
+    .track::after {
+      content: ""; position: absolute; top: 3px; left: 3px;
+      width: 18px; height: 18px; border-radius: 50%; background: #eee; transition: transform .18s;
+    }
+    .switch input:checked + .track { background: var(--accent); }
+    .switch input:checked + .track::after { transform: translateX(18px); }
+    .switch input:focus-visible + .track { outline: 2px solid #7aa7ff; outline-offset: 2px; }
+    footer { display: flex; align-items: center; gap: 14px; margin-top: 8px; }
+    button {
+      background: #2b2b2b; color: var(--text); border: 1px solid var(--line);
+      border-radius: 8px; padding: 9px 14px; font: inherit; cursor: pointer;
+    }
+    button:hover { background: #3a3a3a; }
+    #saved { color: #5ad48a; font-size: 12.5px; opacity: 0; transition: opacity .2s; }
+    #saved.show { opacity: 1; }
+    .note { color: var(--muted); font-size: 12px; margin-top: 10px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <img src="icon48.png" alt="">
+      <h1 data-i18n="optTitle">RuviTube ayarları</h1>
+    </header>
+    <div class="version">RuviTube <span id="version"></span> · <span data-i18n="extName">RuviTube</span></div>
+
+    <section>
+      <h2 data-i18n="optDefaults">Varsayılanlar</h2>
+      <div class="row">
+        <div class="label"><span data-i18n="optVideoQuality">Varsayılan görüntü kalitesi</span></div>
+        <select id="videoQuality">
+          <option value="1080p">1080p</option>
+          <option value="720p">720p</option>
+          <option value="480p">480p</option>
+          <option value="best">En iyi</option>
+        </select>
+      </div>
+      <div class="row">
+        <div class="label"><span data-i18n="optAudioQuality">Varsayılan ses kalitesi</span></div>
+        <select id="audioQuality">
+          <option value="320kbps">320 kbps</option>
+          <option value="192kbps">192 kbps</option>
+        </select>
+      </div>
+      <div class="row">
+        <div class="label"><span data-i18n="optClipLength">Varsayılan kesit süresi (saniye)</span></div>
+        <input type="number" id="clipLength" min="1" step="1">
+      </div>
+    </section>
+
+    <section>
+      <h2 data-i18n="optAfterDownload">İndirme sonrası</h2>
+      <div class="row">
+        <div class="label"><span data-i18n="optOpenDownloads">Chrome İndirilenler sayfasını aç</span></div>
+        <label class="switch"><input type="checkbox" id="openDownloads"><span class="track"></span></label>
+      </div>
+      <div class="row">
+        <div class="label"><span data-i18n="optOpenFile">İndirilen dosyayı aç</span></div>
+        <label class="switch"><input type="checkbox" id="openFile"><span class="track"></span></label>
+      </div>
+      <div class="row">
+        <div class="label"><span data-i18n="optOpenFolder">İndirme klasörünü aç</span></div>
+        <label class="switch"><input type="checkbox" id="openFolder"><span class="track"></span></label>
+      </div>
+    </section>
+
+    <section>
+      <h2 data-i18n="optBehavior">Davranış</h2>
+      <div class="row">
+        <div class="label"><span data-i18n="optShowStatus">Düğme üzerinde yüzde göster</span></div>
+        <label class="switch"><input type="checkbox" id="showStatus"><span class="track"></span></label>
+      </div>
+      <div class="row">
+        <div class="label"><span data-i18n="optRememberClip">Son kullanılan kesit süresini hatırla</span></div>
+        <label class="switch"><input type="checkbox" id="rememberClip"><span class="track"></span></label>
+      </div>
+    </section>
+
+    <footer>
+      <button id="reset" data-i18n="optReset">Varsayılana dön</button>
+      <span id="saved" data-i18n="optSaved">Kaydedildi</span>
+    </footer>
+  </div>
+  <script src="options.js"></script>
+</body>
+</html>
