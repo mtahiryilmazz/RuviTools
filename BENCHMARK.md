@@ -4,6 +4,111 @@
 > **Mimari İlkeler:** Minimal Bellek Yükü (Streaming & Bounded Buffers) · Yüksek Hız · Sistem Bütünlüğü (Atomik Yazım & Sıkı Sınır Denetimi)
 > **Ortam:** Windows 10/11 x86_64 · Saf Rust Release İkilileri (`cargo build --release`) · Harici `yt-dlp`, `deno`, `ffmpeg`, `ffprobe` kurulu olmadan %100 bağımsız çalışma.
 
+![RuviTools Performans, Bellek ve Boyut Grafikleri](docs/assets/benchmark_dashboard.svg)
+
+---
+
+## 📊 Görsel Grafikler (Mermaid XY Charts & Mimari Akış)
+
+### Grafik 1 — Toplam Uygulama Boyutu Kıyaslaması (MB — Düşük Daha İyi)
+
+```mermaid
+xychart-beta
+    title "Uygulama Boyutu Kıyaslaması (MB - Düşük Daha İyi)"
+    x-axis ["ruvic.exe", "ruvid.exe", "RuviTools Toplam", "yt-dlp + deno", "ffmpeg + ffprobe", "Piyasa Yığını Toplamı"]
+    y-axis "Disk Boyutu (MB)" 0 --> 380
+    bar [3.73, 6.87, 10.60, 140, 220, 360]
+```
+
+```text
+ruvic.exe (Native Motor)   █ 3.73 MB
+ruvid.exe (İndirici)       ██ 6.87 MB
+RuviTools Toplam           ███ 10.60 MB  (Sıfır Bağımlılık — ~34x daha küçük)
+yt-dlp + deno runtime      ███████████████████████ ~140 MB
+ffmpeg + ffprobe           ████████████████████████████████████ ~220 MB
+Piyasa Yığını Toplamı      ████████████████████████████████████████████████████████████ ~360 MB
+```
+
+---
+
+### Grafik 2 — 50.3 MB MP4 İşlenirken Bellek Yükü (RAM) Kanıtı (MB — Düşük Daha İyi)
+
+```mermaid
+xychart-beta
+    title "50.3 MB MP4 İşlenirken Dosya Boyutu vs. RAM Kullanımı (MB)"
+    x-axis ["Girdi Dosyası (50.3 MB)", "probe Özel RAM", "trim/audio Özel RAM", "50.3MB Remux Özel RAM", "50.3MB Remux WorkingSet", "ruvid --jobs 4 Özel RAM"]
+    y-axis "Megabayt (MB)" 0 --> 55
+    bar [50.30, 0.86, 0.82, 3.53, 8.98, 10.74]
+```
+
+```text
+Girdi Dosyası (MP4)        ██████████████████████████████████████████████████ 50.30 MB (100%)
+ruvic probe (Özel RAM)     █ 0.86 MB  (%1.7 — Seek tabanlı üst veri okuma)
+ruvic trim / audio M4A     █ 0.82 MB  (%1.6)
+ruvic 50.3MB Remux (Özel)  ████ 3.53 MB (%7.0 — 64KB/1MB Streaming Buffer)
+ruvic 50.3MB Remux (WS)    █████████ 8.98 MB (%17.8 — Tepe Çalışma Seti)
+ruvid --jobs 4 (Özel RAM)  ███████████ 10.74 MB (8–16 paralel Range akışı)
+```
+
+---
+
+### Grafik 3 — `ruvic.exe` Saf Rust Native Motor İşlem Süreleri (ms — Düşük Daha İyi)
+
+```mermaid
+xychart-beta
+    title "ruvic Saf Rust Medya Motoru İşlem Süreleri (Milisaniye)"
+    x-axis ["probe (50MB)", "probe (YT)", "trim (5sn)", "audio (.aac)", "remux (YT)", "audio (.m4a)", "remux (50.3MB)"]
+    y-axis "Süre (ms)" 0 --> 50
+    bar [17.08, 23.59, 23.78, 25.38, 25.65, 25.70, 42.36]
+```
+
+---
+
+### Grafik 4 — Soğuk Başlangıç (Cold-Start) Gecikmesi (ms — Düşük Daha İyi)
+
+```mermaid
+xychart-beta
+    title "Soğuk Başlangıç (--version) Gecikmesi (Milisaniye)"
+    x-axis ["ruvic.exe", "ruvid.exe", "yt-dlp.exe (PyInstaller Ort.)"]
+    y-axis "Gecikme (ms)" 0 --> 850
+    bar [30.95, 50.23, 800]
+```
+
+---
+
+### Grafik 5 — Canlı YouTube (`jNQXAC9IVRw`) Uçtan Uca İndirme & Remux Süreleri (ms)
+
+```mermaid
+xychart-beta
+    title "Canlı YouTube (--jobs 4) Uçtan Uca Süreler (Milisaniye)"
+    x-axis ["DASH Video+Ses (16 Parça) + Oto-Remux", "Dinamik Range (--jobs 4, 8 Parça)", "Video + 2 SRT Altyazı + JSON Manifest"]
+    y-axis "Süre (ms)" 0 --> 3000
+    bar [1538.24, 1875.14, 2837.44]
+```
+
+---
+
+### Grafik 6 — Minimal Bellek & Sıfır Kopya Streaming Mimari Akışı
+
+```mermaid
+flowchart LR
+    subgraph RUVID["ruvid.exe (6.87 MB — ~10.7 MB Özel RAM)"]
+        A["YouTube / HLS / DASH URL"] --> B["Saf Rust Innertube Çözümleyici"]
+        B --> C["Range: bytes=0-0 Dinamik Yoklama"]
+        C --> D["--jobs N Paralel Range Akışı (64 KB Tampon)"]
+        D --> E[".part Atomik Yazım + Checkpoint"]
+    end
+
+    subgraph RUVIC["ruvic.exe (3.73 MB — 0.8–3.5 MB Özel RAM)"]
+        F["Seek Tabanlı moov / EBML Probe"] --> G["validate_moov_integrity (Exit 8 Koruma)"]
+        G --> H["stco / co64 Offset Rebasing & Faststart"]
+        H --> I["copy_chunked (64 KB Okuma / 1 MB BufWriter)"]
+        I --> J["Atomik .ruvic-tmp -> Nihai Medya"]
+    end
+
+    E -->|"DualStreamHandoff / Otomatik Çağrı"| F
+```
+
 ---
 
 ## 1. Uygulama Boyutu ve Bağımlılık Kıyaslaması
@@ -31,8 +136,6 @@
 | `ruvid.exe --version` | **50.23 ms** | **< 5.5 MB** | **~1.27 MB** |
 | `ruvic.exe --version` | **30.95 ms** | **3.20 MB** | **0.85 MB** |
 
-*(Karşılaştırma notu: PyInstaller tabanlı `yt-dlp.exe --version` soğuk başlangıcı arşiv açımı nedeniyle tipik olarak 450–1,200 ms sürer; `ruvid.exe` ~10x–20x daha hızlı başlar.)*
-
 ### 2.2 Canlı YouTube İndirme Testleri (`https://www.youtube.com/watch?v=jNQXAC9IVRw`)
 | Senaryo | Komut Özeti | Akış / Parça (`chunks_total`) | İndirilen Boyut | Toplam Süre | Tepe RAM (`PeakWorkingSet`) | Özel RAM (`PrivateMemory`) |
 |---|---|---:|---:|---:|---:|---:|
@@ -59,8 +162,6 @@
 |---|---:|---:|---:|---:|---:|
 | `ruvic probe large_50mb.mp4 --json` | **17.08 ms** | Seek tabanlı (üst veri okuma) | **3.22 MB** | **0.86 MB** | **%1.7** |
 | `ruvic remux large_50mb.mp4 -o large_remuxed.mp4 --overwrite --json` | **42.36 ms** | **~1,187 MB/sn** | **8.98 MB** | **3.53 MB** | **%7.0** |
-
-> **Bellek Kanıtı:** **50.3 MB** büyüklüğündeki MP4 dosyası işlenirken `ruvic.exe`'nin özel bellek kullanımı yalnızca **3.53 MB** (toplam çalışma seti **8.98 MB**) seviyesinde kalmıştır. Bu ölçüm, dosyanın tamamının RAM'e alınmadığını ve akış (streaming) mimarisinin çalıştığını doğrudan kanıtlar.
 
 ---
 
