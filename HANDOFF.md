@@ -29,6 +29,11 @@ Her iki uygulama da harici araçlara (`yt-dlp`, `deno`, `ffmpeg`, `ffprobe`) ba�
     - **360/VR & HDR Meta Veri Koruma:** ISO-BMFF (`sv3d`, `proj`, `colr`, `mdcv`, `clli`) ve WebM EBML (`0x55B0` Colour, `0x7670` Projection) kutularını remux ve trim sırasında koruma.
     - **Sıkı Sistem Bütünlüğü (`ExitCode::Integrity = 8`):** `validate_moov_integrity` ile yazım öncesi `stco`/`co64` tablo boyutu, version/flags=0, EOF sınır aşımı ve alt kutu taşmalarını denetleyip bozuk girdileri reddetme; atomik geçici dosya yazımı ve hata anında temizlik.
 
+- **`ruvi-gui/` (`d:\mtahiryilmazz\Github\RuviTools\ruvi-gui`) — RuviStudio Masaüstü GUI (`egui` / `eframe`)**
+  - Release ikilisi: `ruvi-gui\target\release\ruvi-studio.exe` (**9,316,352 B / ~8.88 MB**)
+  - Kalite Kapıları: `cargo fmt --all -- --check` ✅ · `cargo clippy --all-targets -- -D warnings` ✅ · `cargo test` (**2/2** entegrasyon testi geçti) ✅
+  - Mimari: `ruvid` ve `ruvic` crate'lerini alt süreç başlatmadan doğrudan Rust kütüphanesi olarak bağlar; 4 sekmeli karanlık tema stüdyo arayüzü (**1. Video İndirici**, **2. Medya Stüdyosu (`ruvic` Native Motor)**, **3. Playlist & Podcast Kuyruğu**, **4. Performans & Bellek Monitörü**) sunar.
+
 ## 2. Performans ve Piyasa Kıyaslama Özeti (`BENCHMARK.md`)
 
 Detaylı ölçümler [BENCHMARK.md](file:///d:/mtahiryilmazz/Github/RuviTools/BENCHMARK.md) dosyasındadır:

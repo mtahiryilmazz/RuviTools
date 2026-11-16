@@ -1,0 +1,28 @@
+[package]
+name = "ruvi-gui"
+version = "0.1.0"
+edition = "2024"
+license = "MIT"
+rust-version = "1.85"
+description = "RuviStudio — Pure-Rust Desktop GUI for RUVID Downloader & RUVIC Native Media Engine"
+
+[lib]
+name = "ruvi_gui"
+path = "src/lib.rs"
+
+[[bin]]
+name = "ruvi-studio"
+path = "src/main.rs"
+
+[dependencies]
+eframe = "0.31"
+ruvid = { path = "../ruvid" }
+ruvic = { path = "../ruvic" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"] }
+
+[dev-dependencies]
+assert_cmd = "2"
+predicates = "3"
+tempfile = "3"

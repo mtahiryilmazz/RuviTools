@@ -115,9 +115,10 @@ flowchart LR
 
 | Araç / Paket | Bileşenler | Toplam Disk Boyutu | Çalışma Zamanı Bağımlılığı |
 |---|---|---:|---|
-| **`ruvid.exe`** (Bu Proje) | Tekil native Rust ikilisi | **7,208,448 B (~6.87 MB)** | **Sıfır** (Saf Rust, gömülü Innertube + Range + HLS/DASH + XML altyazı) |
-| **`ruvic.exe`** (Bu Proje) | Tekil native Rust ikilisi | **3,911,680 B (~3.73 MB)** | **Sıfır** (Saf Rust native ISO-BMFF/MP4 + EBML/WebM + ADTS motoru) |
-| **RuviTools Toplam (`ruvid` + `ruvic`)** | İndirici + Medya Motoru | **11,120,128 B (~10.60 MB)** | **Sıfır harici ikili veya script çalışma zamanı** |
+| **`ruvid.exe`** (CLI İndirici) | Tekil native Rust ikilisi | **7,208,448 B (~6.87 MB)** | **Sıfır** (Saf Rust, gömülü Innertube + Range + HLS/DASH + XML altyazı) |
+| **`ruvic.exe`** (CLI Medya Motoru) | Tekil native Rust ikilisi | **3,911,680 B (~3.73 MB)** | **Sıfır** (Saf Rust native ISO-BMFF/MP4 + EBML/WebM + ADTS motoru) |
+| **`ruvi-studio.exe`** (Masaüstü GUI) | **`egui`/`eframe` + `ruvid` + `ruvic` tekil `.exe`** | **9,316,352 B (~8.88 MB)** | **Sıfır** (Hem indiriciyi hem medya motorunu doğrudan kütüphane olarak içerir) |
+| **RuviTools CLI Toplamı (`ruvid` + `ruvic`)** | İndirici + Medya Motoru | **11,120,128 B (~10.60 MB)** | **Sıfır harici ikili veya script çalışma zamanı** |
 | Piyasa Referansı: `yt-dlp` + `deno` | `yt-dlp.exe` (~18 MB PyInstaller) + `deno.exe` (~110–130 MB V8 JS runtime) | **~130–148 MB** | Python gömülü arşiv açımı + JS imza çözücü alt süreci |
 | Piyasa Referansı: `ffmpeg` + `ffprobe` | `ffmpeg.exe` (~85–140 MB) + `ffprobe.exe` (~85–140 MB) | **~170–280 MB** | Harici C/C++ ikilileri |
 | **Piyasa Yığını Toplamı** | `yt-dlp` + `deno` + `ffmpeg` + `ffprobe` | **~300–428 MB** | 4 ayrı ikili + süreçler arası spawn yükü |
@@ -135,6 +136,7 @@ flowchart LR
 |---|---:|---:|---:|
 | `ruvid.exe --version` | **50.23 ms** | **< 5.5 MB** | **~1.27 MB** |
 | `ruvic.exe --version` | **30.95 ms** | **3.20 MB** | **0.85 MB** |
+| `ruvi-studio.exe --headless-self-test` (GUI + Tokio Runtime) | **29.34 ms** | **7.44 MB** | **0.62 MB** |
 
 ### 2.2 Canlı YouTube İndirme Testleri (`https://www.youtube.com/watch?v=jNQXAC9IVRw`)
 | Senaryo | Komut Özeti | Akış / Parça (`chunks_total`) | İndirilen Boyut | Toplam Süre | Tepe RAM (`PeakWorkingSet`) | Özel RAM (`PrivateMemory`) |
