@@ -1,15 +1,10 @@
 use serde_json::{Value, json};
 use url::Url;
 
-use crate::domain::media_manifest::redact_sensitive_url;
 use crate::domain::media_source::{MediaSource, SourceKind, SubtitleTrack};
 use crate::domain::stream::{MediaStream, StreamKind, StreamPayload};
-use crate::downloader::retry::map_reqwest_error;
 use crate::error::{RuviError, RuviResult};
-use crate::resolver::{
-    MAX_MANIFEST_BYTES, ResolveContext, read_response_bytes_limited, read_response_text_limited,
-    validate_url_security,
-};
+use crate::resolver::ResolveContext;
 
 const ANDROID_USER_AGENT: &str = "com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip";
 const IOS_USER_AGENT: &str =
@@ -52,72 +47,39 @@ pub fn extract_video_id(url: &Url) -> Option<String> {
     None
 }
 
-pub fn looks_like_youtube_watch_html(url: &Url, html: &str) -> bool {
-    if html.contains("ytInitialPlayerResponse") {
-        return true;
-    }
-    let has_vid = extract_video_id(url).is_some() || extract_video_id_from_html(html).is_some();
-    has_vid
-        && (html.contains("VISITOR_DATA")
-            || html.contains("INNERTUBE_API_KEY")
-            || html.contains("/youtubei/v1/player"))
-}
-
-pub fn extract_video_id_from_html(html: &str) -> Option<String> {
-    let marker = "\"videoId\":\"";
-    let start = html.find(marker)? + marker.len();
-    let end = html[start..].find('"')?;
-    let val = html[start..start + end].trim();
-    if val.is_empty() || val.len() > 64 {
-        None
-    } else {
-        Some(val.to_string())
-    }
-}
-
-/// Resolves a YouTube URL completely in pure Rust:
-/// 1. Fetches watch HTML (supports offline/mock `ytInitialPlayerResponse` fixtures too).
-/// 2. Extracts `VISITOR_DATA` and queries YouTube's Innertube `/youtubei/v1/player` JSON API
-///    with native Android & iOS client contexts (zero external `yt-dlp` or `deno` processes).
-pub async fn resolve_youtube_url(ctx: &ResolveContext, raw_url: &str) -> RuviResult<MediaSource> {
-    let parsed = ctx.validate_url(raw_url)?;
-    let (html, final_url, _) = fetch_watch_html(ctx, parsed.as_str()).await?;
-    resolve_youtube_from_html(ctx, raw_url, &final_url, &html)
-        .await?
-        .ok_or_else(|| {
-            RuviError::Unsupported(
-                "YouTube Innertube returned no direct playable streams for this video".to_string(),
-            )
-        })
-}
-
+/// Resolves YouTube media from already-fetched HTML page.
+/// 1. Checks if HTML contains embedded `ytInitialPlayerResponse`.
+/// 2. If not, queries YouTube's Innertube `/youtubei/v1/player` JSON API
+///    with native Android & iOS client contexts.
 pub async fn resolve_youtube_from_html(
     ctx: &ResolveContext,
     raw_url: &str,
     final_url: &Url,
     html: &str,
 ) -> RuviResult<Option<MediaSource>> {
-    let yt_hint = is_youtube_url(final_url) || looks_like_youtube_watch_html(final_url, html);
-
     // Check if the HTML itself already carries direct playable URLs (e.g. test fixtures)
-    let html_attempt = extract_youtube_player_response(raw_url, final_url, html);
-    match html_attempt {
-        Ok(Some(native_html_source)) => return Ok(Some(native_html_source)),
-        Ok(None) if !yt_hint => return Ok(None),
-        Err(err) if !yt_hint => return Err(err),
-        Ok(None) | Err(_) => {}
+    if let Ok(Some(native_html_source)) = extract_youtube_player_response(raw_url, final_url, html)
+    {
+        return Ok(Some(native_html_source));
     }
 
-    let parsed_raw = Url::parse(raw_url).ok();
-    let video_id = extract_video_id(final_url)
-        .or_else(|| parsed_raw.as_ref().and_then(extract_video_id))
-        .or_else(|| extract_video_id_from_html(html))
-        .ok_or_else(|| {
-            RuviError::Unsupported(format!(
-                "could not extract YouTube video ID from URL '{}'",
-                redact_sensitive_url(raw_url)
-            ))
-        })?;
+    let parsed_raw = ctx.validate_url(raw_url).ok();
+    let is_yt = is_youtube_url(final_url)
+        || parsed_raw.as_ref().is_some_and(is_youtube_url)
+        || html.contains("ytInitialPlayerResponse")
+        || html.contains("youtube.com")
+        || html.contains("youtu.be");
+
+    if !is_yt {
+        return Ok(None);
+    }
+
+    let video_id =
+        extract_video_id(final_url).or_else(|| parsed_raw.as_ref().and_then(extract_video_id));
+
+    let Some(video_id) = video_id else {
+        return Ok(None);
+    };
 
     let visitor_data = extract_visitor_data(html);
     let innertube_base = Url::parse(&format!(
@@ -142,27 +104,47 @@ pub async fn resolve_youtube_from_html(
         match query_innertube_player(ctx, &api_url, &video_id, visitor_data.as_deref(), profile)
             .await
         {
-            Ok(player_json) => match parse_player_response_json(
-                raw_url,
-                &innertube_base,
-                &player_json,
-                Some(profile.user_agent()),
-            ) {
-                Ok(Some(source)) => return Ok(Some(source)),
-                Ok(None) => {}
-                Err(err) => last_err = Some(err),
-            },
+            Ok(player_json) => {
+                match parse_player_response_json(
+                    raw_url,
+                    &innertube_base,
+                    &player_json,
+                    Some(profile.user_agent()),
+                ) {
+                    Ok(Some(source)) => return Ok(Some(source)),
+                    Ok(None) => {}
+                    Err(err) => {
+                        last_err = Some(err);
+                    }
+                }
+            }
             Err(err) => {
                 last_err = Some(err);
             }
         }
     }
 
-    Err(last_err.unwrap_or_else(|| {
-        RuviError::Unsupported(
-            "YouTube Innertube returned no direct playable streams for this video".to_string(),
-        )
-    }))
+    if let Some(err) = last_err {
+        return Err(err);
+    }
+
+    Ok(None)
+}
+
+/// Resolves a YouTube URL completely in pure Rust:
+/// 1. Fetches watch HTML (supports offline/mock `ytInitialPlayerResponse` fixtures too).
+/// 2. Invokes `resolve_youtube_from_html`.
+pub async fn resolve_youtube_url(ctx: &ResolveContext, raw_url: &str) -> RuviResult<MediaSource> {
+    let parsed = ctx.validate_url(raw_url)?;
+    let (html, final_url, _) = fetch_watch_html(ctx, parsed.as_str()).await?;
+
+    if let Some(source) = resolve_youtube_from_html(ctx, raw_url, &final_url, &html).await? {
+        return Ok(source);
+    }
+
+    Err(RuviError::Unsupported(
+        "YouTube Innertube returned no direct playable streams for this video".to_string(),
+    ))
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -221,14 +203,14 @@ async fn fetch_watch_html(ctx: &ResolveContext, url: &str) -> RuviResult<(String
         .header(reqwest::header::ACCEPT_LANGUAGE, "en-US,en;q=0.9")
         .send()
         .await
-        .map_err(map_reqwest_error)?;
+        .map_err(|err| RuviError::Network(format!("YouTube watch request failed: {err}")))?;
     let final_url = resp.url().clone();
-    validate_url_security(&final_url, ctx.allow_private_net)?;
+    crate::resolver::validate_url_security(&final_url, ctx.allow_private_net)?;
     if !resp.status().is_success() {
         return Err(RuviError::Network(format!(
             "HTTP {} fetching YouTube watch page {}",
             resp.status().as_u16(),
-            redact_sensitive_url(final_url.as_str())
+            final_url
         )));
     }
     let ct = resp
@@ -237,8 +219,16 @@ async fn fetch_watch_html(ctx: &ResolveContext, url: &str) -> RuviResult<(String
         .and_then(|v| v.to_str().ok())
         .unwrap_or("")
         .to_string();
-    let html = read_response_text_limited(resp, MAX_MANIFEST_BYTES).await?;
-    Ok((html, final_url, ct))
+    let bytes = resp
+        .bytes()
+        .await
+        .map_err(|err| RuviError::Network(format!("failed reading YouTube HTML: {err}")))?;
+    if bytes.len() > crate::resolver::MAX_MANIFEST_BYTES {
+        return Err(RuviError::Unsupported(
+            "YouTube watch page exceeded maximum allowed size".to_string(),
+        ));
+    }
+    Ok((String::from_utf8_lossy(&bytes).into_owned(), final_url, ct))
 }
 
 async fn query_innertube_player(
@@ -248,7 +238,6 @@ async fn query_innertube_player(
     visitor_data: Option<&str>,
     profile: InnertubeClient,
 ) -> RuviResult<Value> {
-    validate_url_security(api_url, ctx.allow_private_net)?;
     let payload = json!({
         "videoId": video_id,
         "context": {
@@ -267,9 +256,10 @@ async fn query_innertube_player(
         req = req.header("X-Goog-Visitor-Id", vd);
     }
 
-    let resp = req.send().await.map_err(map_reqwest_error)?;
-    let final_url = resp.url().clone();
-    validate_url_security(&final_url, ctx.allow_private_net)?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|err| RuviError::Network(format!("YouTube Innertube request failed: {err}")))?;
 
     if !resp.status().is_success() {
         return Err(RuviError::Network(format!(
@@ -278,8 +268,7 @@ async fn query_innertube_player(
         )));
     }
 
-    let bytes = read_response_bytes_limited(resp, MAX_MANIFEST_BYTES).await?;
-    serde_json::from_slice::<Value>(&bytes).map_err(|err| {
+    resp.json::<Value>().await.map_err(|err| {
         RuviError::Unsupported(format!("invalid JSON from YouTube Innertube: {err}"))
     })
 }
@@ -490,8 +479,26 @@ fn parse_player_format(
         .map(ToString::to_string);
     let total_bytes = fmt
         .get("contentLength")
-        .and_then(Value::as_str)
-        .and_then(|s| s.parse::<u64>().ok());
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            fmt.get("contentLength")
+                .and_then(Value::as_str)
+                .and_then(|s| s.parse::<u64>().ok())
+        });
+    let bandwidth_bps = fmt
+        .get("bitrate")
+        .and_then(Value::as_u64)
+        .or_else(|| {
+            fmt.get("bitrate")
+                .and_then(Value::as_str)
+                .and_then(|s| s.parse::<u64>().ok())
+        })
+        .or_else(|| fmt.get("averageBitrate").and_then(Value::as_u64))
+        .or_else(|| {
+            fmt.get("averageBitrate")
+                .and_then(Value::as_str)
+                .and_then(|s| s.parse::<u64>().ok())
+        });
     let itag = fmt
         .get("itag")
         .and_then(Value::as_u64)
@@ -504,7 +511,7 @@ fn parse_player_format(
         container: container.to_string(),
         width: fmt.get("width").and_then(Value::as_u64).map(|v| v as u32),
         height: fmt.get("height").and_then(Value::as_u64).map(|v| v as u32),
-        bandwidth_bps: fmt.get("bitrate").and_then(Value::as_u64),
+        bandwidth_bps,
         codecs,
         frame_rate: fmt
             .get("fps")
@@ -521,46 +528,41 @@ fn parse_player_format(
     })
 }
 
-fn extract_balanced_json_after(html: &str, marker: &str) -> Option<String> {
-    let mut search_from = 0usize;
-    while let Some(rel_idx) = html[search_from..].find(marker) {
-        let marker_end = search_from + rel_idx + marker.len();
-        let after = &html[marker_end..];
-        let brace_rel = after.find('{')?;
-        let between = &after[..brace_rel];
-        if !between.contains('=') || between.len() > 32 {
-            search_from = marker_end;
+pub fn extract_balanced_json_after(html: &str, marker: &str) -> Option<String> {
+    let idx = html.find(marker)?;
+    let after = &html[idx + marker.len()..];
+    extract_balanced_json_from_slice(after)
+}
+
+pub fn extract_balanced_json_from_slice(slice: &str) -> Option<String> {
+    let brace_rel = slice.find('{')?;
+    let json_slice = &slice[brace_rel..];
+
+    let mut depth = 0usize;
+    let mut in_str = false;
+    let mut escaped = false;
+    for (i, ch) in json_slice.char_indices() {
+        if in_str {
+            if escaped {
+                escaped = false;
+            } else if ch == '\\' {
+                escaped = true;
+            } else if ch == '"' {
+                in_str = false;
+            }
             continue;
         }
-        let json_slice = &after[brace_rel..];
-
-        let mut depth = 0usize;
-        let mut in_str = false;
-        let mut escaped = false;
-        for (i, ch) in json_slice.char_indices() {
-            if in_str {
-                if escaped {
-                    escaped = false;
-                } else if ch == '\\' {
-                    escaped = true;
-                } else if ch == '"' {
-                    in_str = false;
+        match ch {
+            '"' => in_str = true,
+            '{' => depth += 1,
+            '}' => {
+                depth = depth.saturating_sub(1);
+                if depth == 0 {
+                    return Some(json_slice[..=i].to_string());
                 }
-                continue;
             }
-            match ch {
-                '"' => in_str = true,
-                '{' => depth += 1,
-                '}' => {
-                    depth = depth.saturating_sub(1);
-                    if depth == 0 {
-                        return Some(json_slice[..=i].to_string());
-                    }
-                }
-                _ => {}
-            }
+            _ => {}
         }
-        search_from = marker_end;
     }
     None
 }

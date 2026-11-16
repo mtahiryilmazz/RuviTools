@@ -2,15 +2,15 @@ use std::path::{Path, PathBuf};
 
 use tokio_util::sync::CancellationToken;
 
-use crate::assembly::write_handoff_manifest;
+use crate::assembly::{write_dual_stream_handoff_manifest, write_handoff_manifest};
 use crate::config::RuvidConfig;
 use crate::domain::download_job::{DownloadJob, DownloadOutcome, DownloadPlan, SubtitleDownload};
 use crate::domain::media_manifest::redact_sensitive_url;
 use crate::domain::media_source::SubtitleTrack;
-use crate::domain::selection::select_stream;
-use crate::domain::stream::StreamPayload;
+use crate::domain::selection::{select_stream, select_stream_pair};
+use crate::domain::stream::{MediaStream, StreamPayload};
 use crate::downloader::cancellation::spawn_ctrl_c_listener;
-use crate::downloader::http_range::download_direct_http;
+use crate::downloader::http_range::{DirectDownloadStats, download_direct_http};
 use crate::downloader::segment_worker::download_segmented_stream;
 use crate::downloader::throttle::{RateLimiter, parse_rate_limit};
 use crate::error::{RuviError, RuviResult};
@@ -63,6 +63,152 @@ pub async fn execute_download(
     } else {
         ctx
     };
+
+    // Check if a dual-stream (adaptive video + audio) pair should be selected
+    let dual_stream_pair = if !job.to_stdout {
+        select_stream_pair(&source.streams, &job.format_spec)
+    } else {
+        None
+    };
+
+    if let Some((video_stream, audio_stream)) = dual_stream_pair {
+        let ext = if video_stream.container.is_empty() {
+            source.default_ext.as_str()
+        } else {
+            video_stream.container.as_str()
+        };
+        let resolved = resolve_output_path(
+            job.output_template.as_deref(),
+            &config.download.output_dir,
+            &source.title,
+            ext,
+            &video_stream.id,
+        )?;
+        ensure_writable_destination(&resolved, job.overwrite)?;
+        let output_path = resolved;
+
+        let parent = output_path
+            .parent()
+            .filter(|p| !p.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        let raw_stem = output_path
+            .file_stem()
+            .and_then(|s| s.to_str())
+            .unwrap_or("media");
+        let stem = sanitize_filename(raw_stem);
+        let video_output_path = parent.join(format!("{stem}.video.part"));
+        let audio_output_path = parent.join(format!("{stem}.audio.part"));
+
+        let v_bytes = match &video_stream.payload {
+            StreamPayload::DirectHttp { total_bytes, .. } => *total_bytes,
+            _ => None,
+        };
+        let a_bytes = match &audio_stream.payload {
+            StreamPayload::DirectHttp { total_bytes, .. } => *total_bytes,
+            _ => None,
+        };
+        let combined_total = match (v_bytes, a_bytes) {
+            (Some(v), Some(a)) => Some(v + a),
+            _ => None,
+        };
+
+        let video_plan = DownloadPlan {
+            source: source.clone(),
+            stream: video_stream.clone(),
+            output_path: video_output_path.clone(),
+            jobs: job.jobs.max(1),
+            resume: job.resume,
+            overwrite: job.overwrite,
+            rate_limit_bps,
+            retry_count: job.retry_count,
+            timeout_seconds: job.timeout_seconds,
+            to_stdout: false,
+        };
+        let audio_plan = DownloadPlan {
+            source: source.clone(),
+            stream: audio_stream.clone(),
+            output_path: audio_output_path.clone(),
+            jobs: job.jobs.max(1),
+            resume: job.resume,
+            overwrite: job.overwrite,
+            rate_limit_bps,
+            retry_count: job.retry_count,
+            timeout_seconds: job.timeout_seconds,
+            to_stdout: false,
+        };
+
+        let cancel = CancellationToken::new();
+        spawn_ctrl_c_listener(cancel.clone());
+        let limiter = RateLimiter::new(rate_limit_bps);
+        let progress = DownloadProgress::new(show_progress, combined_total, &source.title);
+
+        let (v_stats, a_stats) = tokio::try_join!(
+            dispatch_stream_download(
+                &ctx,
+                &video_plan,
+                video_stream,
+                &progress,
+                &limiter,
+                &cancel
+            ),
+            dispatch_stream_download(
+                &ctx,
+                &audio_plan,
+                audio_stream,
+                &progress,
+                &limiter,
+                &cancel
+            ),
+        )?;
+
+        progress.finish();
+
+        let total_downloaded = v_stats.bytes_downloaded + a_stats.bytes_downloaded;
+        let downloaded_subtitles = if job.subtitles && !source.subtitles.is_empty() {
+            download_matching_subtitles(
+                &ctx,
+                &source.subtitles,
+                job.subtitles_lang.as_deref(),
+                &output_path,
+                job.overwrite,
+            )
+            .await?
+        } else {
+            Vec::new()
+        };
+
+        let manifest_path_str = if let Some(ref m_path) = job.write_manifest {
+            write_dual_stream_handoff_manifest(
+                m_path,
+                &source,
+                video_stream,
+                audio_stream,
+                &video_output_path,
+                &audio_output_path,
+                &output_path,
+                total_downloaded,
+                &downloaded_subtitles,
+            )?;
+            Some(m_path.to_string_lossy().into_owned())
+        } else {
+            None
+        };
+
+        return Ok(DownloadOutcome {
+            ok: true,
+            url: redact_sensitive_url(&job.url),
+            title: source.title,
+            stream_id: format!("{}+{}", video_stream.id, audio_stream.id),
+            output_path: output_path.to_string_lossy().into_owned(),
+            bytes_downloaded: total_downloaded,
+            resumed: v_stats.resumed || a_stats.resumed,
+            chunks_total: v_stats.chunks_total + a_stats.chunks_total,
+            chunks_resumed: v_stats.chunks_resumed + a_stats.chunks_resumed,
+            manifest_path: manifest_path_str,
+            subtitles: downloaded_subtitles,
+        });
+    }
+
     let selected = select_stream(&source.streams, &job.format_spec)?.clone();
 
     let output_path = if job.to_stdout {
@@ -115,66 +261,8 @@ pub async fn execute_download(
     let progress =
         DownloadProgress::new(show_progress && !job.to_stdout, total_bytes, &source.title);
 
-    let stats = match selected.payload.clone() {
-        StreamPayload::DirectHttp {
-            url,
-            total_bytes,
-            accept_ranges,
-            etag,
-            last_modified,
-        } => {
-            download_direct_http(
-                &ctx,
-                &plan,
-                &url,
-                total_bytes,
-                accept_ranges,
-                etag,
-                last_modified,
-                &progress,
-                &limiter,
-                &cancel,
-            )
-            .await?
-        }
-        StreamPayload::Hls {
-            playlist_url,
-            init_segment_url,
-            segments,
-            ..
-        } => {
-            download_segmented_stream(
-                &ctx,
-                &plan,
-                &playlist_url,
-                init_segment_url,
-                segments,
-                true,
-                &progress,
-                &limiter,
-                &cancel,
-            )
-            .await?
-        }
-        StreamPayload::Dash {
-            mpd_url,
-            init_segment_url,
-            segments,
-        } => {
-            download_segmented_stream(
-                &ctx,
-                &plan,
-                &mpd_url,
-                init_segment_url,
-                segments,
-                false,
-                &progress,
-                &limiter,
-                &cancel,
-            )
-            .await?
-        }
-    };
+    let stats =
+        dispatch_stream_download(&ctx, &plan, &selected, &progress, &limiter, &cancel).await?;
 
     progress.finish();
 
@@ -260,4 +348,74 @@ async fn download_matching_subtitles(
     }
 
     Ok(results)
+}
+
+async fn dispatch_stream_download(
+    ctx: &ResolveContext,
+    plan: &DownloadPlan,
+    stream: &MediaStream,
+    progress: &DownloadProgress,
+    limiter: &RateLimiter,
+    cancel: &CancellationToken,
+) -> RuviResult<DirectDownloadStats> {
+    match stream.payload.clone() {
+        StreamPayload::DirectHttp {
+            url,
+            total_bytes,
+            accept_ranges,
+            etag,
+            last_modified,
+        } => {
+            download_direct_http(
+                ctx,
+                plan,
+                &url,
+                total_bytes,
+                accept_ranges,
+                etag,
+                last_modified,
+                progress,
+                limiter,
+                cancel,
+            )
+            .await
+        }
+        StreamPayload::Hls {
+            playlist_url,
+            init_segment_url,
+            segments,
+            ..
+        } => {
+            download_segmented_stream(
+                ctx,
+                plan,
+                &playlist_url,
+                init_segment_url,
+                segments,
+                true,
+                progress,
+                limiter,
+                cancel,
+            )
+            .await
+        }
+        StreamPayload::Dash {
+            mpd_url,
+            init_segment_url,
+            segments,
+        } => {
+            download_segmented_stream(
+                ctx,
+                plan,
+                &mpd_url,
+                init_segment_url,
+                segments,
+                false,
+                progress,
+                limiter,
+                cancel,
+            )
+            .await
+        }
+    }
 }

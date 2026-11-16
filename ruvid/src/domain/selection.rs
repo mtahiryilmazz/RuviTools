@@ -1,4 +1,4 @@
-use crate::domain::stream::MediaStream;
+use crate::domain::stream::{MediaStream, StreamKind};
 use crate::error::{RuviError, RuviResult};
 
 pub fn select_stream<'a>(streams: &'a [MediaStream], spec: &str) -> RuviResult<&'a MediaStream> {
@@ -77,4 +77,157 @@ pub fn select_stream<'a>(streams: &'a [MediaStream], spec: &str) -> RuviResult<&
     Err(RuviError::InvalidArgument(format!(
         "no stream matching format selector '{spec}'"
     )))
+}
+
+/// Selects a separate video and audio stream pair for DASH / adaptive media.
+///
+/// Returns:
+/// - `Some((video, audio))` if an adaptive video stream matches the spec and has a compatible audio stream.
+/// - `None` if the matching stream is already muxed `VideoAudio` (preserving single-stream downloading),
+///   or if no audio stream exists.
+pub fn select_stream_pair<'a>(
+    streams: &'a [MediaStream],
+    spec: &str,
+) -> Option<(&'a MediaStream, &'a MediaStream)> {
+    if streams.is_empty() {
+        return None;
+    }
+
+    let trimmed = spec.trim();
+
+    // 1. Check if user specified an explicit stream ID
+    if let Some(exact) = streams.iter().find(|s| s.id.eq_ignore_ascii_case(trimmed)) {
+        if exact.kind == StreamKind::VideoAudio {
+            return None;
+        }
+        if exact.kind == StreamKind::Video {
+            let audio = find_best_audio(streams, exact)?;
+            return Some((exact, audio));
+        }
+        return None;
+    }
+
+    // 2. "worst" selection is handled by single-stream
+    if trimmed.eq_ignore_ascii_case("worst") {
+        return None;
+    }
+
+    // 3. Collect video candidates
+    let video_candidates: Vec<&MediaStream> = streams
+        .iter()
+        .filter(|s| s.kind == StreamKind::Video || s.kind == StreamKind::VideoAudio)
+        .collect();
+
+    if video_candidates.is_empty() {
+        return None;
+    }
+
+    let clean = trimmed.to_ascii_lowercase();
+    let prefer_60 = clean.contains("60");
+
+    let video_score = |s: &MediaStream| -> (u32, u32, u64) {
+        let h = s.height.unwrap_or(0);
+        let fps = s
+            .frame_rate
+            .as_deref()
+            .and_then(|f| f.parse::<u32>().ok())
+            .unwrap_or(30);
+        let fps_match = if prefer_60 {
+            if fps >= 60 { 2 } else { 1 }
+        } else {
+            1
+        };
+        (h, fps_match, s.bandwidth_bps.unwrap_or(0))
+    };
+
+    let selected_video: &MediaStream = if clean.is_empty() || clean == "best" {
+        video_candidates
+            .into_iter()
+            .max_by_key(|s| video_score(s))?
+    } else {
+        let target_height = if clean.starts_with("4k") || clean.starts_with("uhd") {
+            Some(2160)
+        } else if clean.starts_with("8k") {
+            Some(4320)
+        } else {
+            let digits: String = clean.chars().take_while(|c| c.is_ascii_digit()).collect();
+            digits.parse::<u32>().ok()
+        };
+
+        let target_h = target_height?;
+        {
+            // Find exact height match
+            let exact_h = video_candidates
+                .iter()
+                .copied()
+                .filter(|s| s.height == Some(target_h))
+                .max_by_key(|s| video_score(s));
+
+            if let Some(v) = exact_h {
+                v
+            } else {
+                // Fallback to highest <= target_height
+                let le_h = video_candidates
+                    .iter()
+                    .copied()
+                    .filter(|s| s.height.is_some_and(|h| h <= target_h))
+                    .max_by_key(|s| video_score(s));
+                if let Some(v) = le_h {
+                    v
+                } else {
+                    video_candidates
+                        .into_iter()
+                        .max_by_key(|s| video_score(s))?
+                }
+            }
+        }
+    };
+
+    // If the selected stream is already muxed VideoAudio, do not dual-stream
+    if selected_video.kind == StreamKind::VideoAudio {
+        return None;
+    }
+    if selected_video.kind != StreamKind::Video {
+        return None;
+    }
+
+    let best_audio = find_best_audio(streams, selected_video)?;
+    Some((selected_video, best_audio))
+}
+
+fn find_best_audio<'a>(streams: &'a [MediaStream], video: &MediaStream) -> Option<&'a MediaStream> {
+    let audio_pool: Vec<&MediaStream> = streams
+        .iter()
+        .filter(|s| s.kind == StreamKind::Audio)
+        .collect();
+
+    if audio_pool.is_empty() {
+        return None;
+    }
+
+    let is_webm = video.container.eq_ignore_ascii_case("webm");
+    let compatible_audio = audio_pool
+        .iter()
+        .copied()
+        .filter(|a| {
+            if is_webm {
+                a.container.eq_ignore_ascii_case("webm")
+                    || a.codecs
+                        .as_deref()
+                        .is_some_and(|c| c.to_ascii_lowercase().contains("opus"))
+            } else {
+                a.container.eq_ignore_ascii_case("m4a")
+                    || a.container.eq_ignore_ascii_case("mp4")
+                    || a.codecs
+                        .as_deref()
+                        .is_some_and(|c| c.to_ascii_lowercase().contains("mp4a"))
+            }
+        })
+        .max_by_key(|a| a.bandwidth_bps.unwrap_or(0));
+
+    compatible_audio.or_else(|| {
+        audio_pool
+            .into_iter()
+            .max_by_key(|a| a.bandwidth_bps.unwrap_or(0))
+    })
 }

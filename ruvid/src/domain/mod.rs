@@ -8,9 +8,9 @@ pub use download_job::{
     DownloadJob, DownloadOutcome, DownloadPlan, PlaylistReport, SubtitleDownload,
 };
 pub use media_manifest::{
-    ManifestOutput, ManifestProducer, ManifestSource, ManifestStream, ManifestSubtitle,
-    RuviManifest,
+    DualStreamHandoff, ManifestOutput, ManifestProducer, ManifestSource, ManifestStream,
+    ManifestSubtitle, RuviManifest,
 };
 pub use media_source::{MediaSource, SourceKind, SubtitleTrack};
-pub use selection::select_stream;
+pub use selection::{select_stream, select_stream_pair};
 pub use stream::{MediaStream, StreamKind};

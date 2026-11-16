@@ -110,6 +110,7 @@ pub async fn execute_convert(
     let job = ConversionJob {
         kind: OperationKind::Convert,
         input: req.input,
+        secondary_input: None,
         output: req.output,
         container,
         overwrite,

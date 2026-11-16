@@ -18,6 +18,7 @@ use crate::planner::validation::{
 pub struct ConversionPlan {
     pub operation: OperationKind,
     pub input: PathBuf,
+    pub secondary_input: Option<PathBuf>,
     pub temp_output: PathBuf,
     pub final_output: PathBuf,
     pub overwrite: OverwritePolicy,
@@ -53,6 +54,9 @@ pub fn plan_conversion(
     temp_output: PathBuf,
 ) -> RuviResult<ConversionPlan> {
     validate_io_paths(&job.input, &job.output, job.overwrite)?;
+    if let Some(ref sec) = job.secondary_input {
+        validate_io_paths(sec, &job.output, job.overwrite)?;
+    }
     validate_selected_streams(probe_info, job.video_stream, job.audio_stream)?;
 
     let has_video = probe_info
@@ -238,6 +242,7 @@ pub fn plan_conversion(
     Ok(ConversionPlan {
         operation: job.kind,
         input: job.input,
+        secondary_input: job.secondary_input,
         temp_output,
         final_output: job.output,
         overwrite: job.overwrite,

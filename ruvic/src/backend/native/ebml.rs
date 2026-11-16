@@ -1,3 +1,6 @@
+use std::io::{Read, Seek, SeekFrom, Write};
+
+use crate::backend::native::mp4_atoms::copy_chunked;
 use crate::domain::media_info::{ContainerInfo, MediaInfo};
 use crate::domain::stream::{AudioCodec, ContainerFormat, StreamInfo, StreamKind, VideoCodec};
 use crate::error::{RuviError, RuviResult};
@@ -220,6 +223,7 @@ fn parse_track_entry(entry: &[u8], fallback_idx: usize) -> Option<StreamInfo> {
     let mut sample_rate: Option<u32> = None;
     let mut channels: Option<u16> = None;
     let mut language: Option<String> = None;
+    let mut stream_info = StreamInfo::default();
 
     while pos < entry.len() {
         let (id, id_len) = read_ebml_id(&entry[pos..])?;
@@ -242,7 +246,7 @@ fn parse_track_entry(entry: &[u8], fallback_idx: usize) -> Option<StreamInfo> {
                         .to_string(),
                 );
             }
-            0xE0 => parse_video_settings(val, &mut width, &mut height),
+            0xE0 => parse_video_settings(val, &mut width, &mut height, &mut stream_info),
             0xE1 => parse_audio_settings(val, &mut sample_rate, &mut channels),
             _ => {}
         }
@@ -256,22 +260,28 @@ fn parse_track_entry(entry: &[u8], fallback_idx: usize) -> Option<StreamInfo> {
         _ => return None,
     };
 
-    Some(StreamInfo {
-        index: fallback_idx,
-        kind,
-        codec_name: map_ebml_codec(&codec_id),
-        width,
-        height,
-        fps: (kind == StreamKind::Video).then_some(30.0),
-        sample_rate,
-        channels,
-        bit_rate: None,
-        language,
-        pixel_format: (kind == StreamKind::Video).then(|| "yuv420p".to_string()),
-    })
+    stream_info.index = fallback_idx;
+    stream_info.kind = kind;
+    stream_info.codec_name = map_ebml_codec(&codec_id);
+    stream_info.width = width;
+    stream_info.height = height;
+    stream_info.fps = (kind == StreamKind::Video).then_some(30.0);
+    stream_info.sample_rate = sample_rate;
+    stream_info.channels = channels;
+    stream_info.language = language;
+    if kind == StreamKind::Video && stream_info.pixel_format.is_none() {
+        stream_info.pixel_format = Some("yuv420p".to_string());
+    }
+
+    Some(stream_info)
 }
 
-fn parse_video_settings(v: &[u8], width: &mut Option<u32>, height: &mut Option<u32>) {
+fn parse_video_settings(
+    v: &[u8],
+    width: &mut Option<u32>,
+    height: &mut Option<u32>,
+    stream: &mut StreamInfo,
+) {
     let mut pos = 0usize;
     while pos < v.len() {
         let Some((id, id_len)) = read_ebml_id(&v[pos..]) else {
@@ -288,9 +298,52 @@ fn parse_video_settings(v: &[u8], width: &mut Option<u32>, height: &mut Option<u
             *width = read_uint_be(val).map(|n| n as u32);
         } else if id == 0xBA {
             *height = read_uint_be(val).map(|n| n as u32);
+        } else if id == 0x55B0 {
+            parse_ebml_colour(val, stream);
+        } else if id == 0x7670 {
+            parse_ebml_projection(val, stream);
         }
         pos = end;
     }
+}
+
+fn parse_ebml_colour(c: &[u8], stream: &mut StreamInfo) {
+    let mut pos = 0usize;
+    while pos < c.len() {
+        let Some((id, id_len)) = read_ebml_id(&c[pos..]) else {
+            break;
+        };
+        pos += id_len;
+        let Some((size, sz_len, _)) = read_ebml_size(&c[pos..]) else {
+            break;
+        };
+        pos += sz_len;
+        let end = pos.saturating_add(size as usize).min(c.len());
+        let val = &c[pos..end];
+        match id {
+            0x55B1 => {
+                stream.color_matrix = read_uint_be(val).map(|n| n as u16);
+            }
+            0x55B7 => {
+                stream.color_primaries = read_uint_be(val).map(|n| n as u16);
+            }
+            0x55B8 => {
+                stream.color_transfer = read_uint_be(val).map(|n| n as u16);
+            }
+            0x55B9 => {
+                stream.color_full_range = read_uint_be(val).map(|n| n == 2);
+            }
+            0x55D0 => {
+                stream.mastering_display = Some(val.to_vec());
+            }
+            _ => {}
+        }
+        pos = end;
+    }
+}
+
+fn parse_ebml_projection(p: &[u8], stream: &mut StreamInfo) {
+    stream.spatial_360 = Some(p.to_vec());
 }
 
 fn parse_audio_settings(a: &[u8], sample_rate: &mut Option<u32>, channels: &mut Option<u16>) {
@@ -395,6 +448,8 @@ pub struct EbmlBuildSpec<'a> {
     pub video: Option<(VideoCodec, u32, u32)>,
     pub audio: Option<(AudioCodec, u32, u16)>,
     pub payload: &'a [u8],
+    pub video_colour: Option<Vec<u8>>,
+    pub video_projection: Option<Vec<u8>>,
 }
 
 pub fn build_ebml_bytes(spec: &EbmlBuildSpec<'_>) -> Vec<u8> {
@@ -433,6 +488,12 @@ pub fn build_ebml_bytes(spec: &EbmlBuildSpec<'_>) -> Vec<u8> {
         let mut video_el = Vec::new();
         video_el.extend_from_slice(&ebml_uint_elem(0xB0, u64::from(w.max(2))));
         video_el.extend_from_slice(&ebml_uint_elem(0xBA, u64::from(h.max(2))));
+        if let Some(ref c) = spec.video_colour {
+            video_el.extend_from_slice(c);
+        }
+        if let Some(ref p) = spec.video_projection {
+            video_el.extend_from_slice(p);
+        }
         let mut te = Vec::new();
         te.extend_from_slice(&ebml_uint_elem(0xD7, track_num));
         te.extend_from_slice(&ebml_uint_elem(0x73C5, track_num));
@@ -521,4 +582,162 @@ fn encode_vint_size(size: u64) -> Vec<u8> {
         v[0] |= 0x01;
         v.to_vec()
     }
+}
+
+pub fn build_ebml_colour_element(stream: &StreamInfo) -> Option<Vec<u8>> {
+    let mut body = Vec::new();
+    if let Some(matrix) = stream.color_matrix {
+        body.extend_from_slice(&ebml_uint_elem(0x55B1, u64::from(matrix)));
+    }
+    if let Some(primaries) = stream.color_primaries {
+        body.extend_from_slice(&ebml_uint_elem(0x55B7, u64::from(primaries)));
+    }
+    if let Some(transfer) = stream.color_transfer {
+        body.extend_from_slice(&ebml_uint_elem(0x55B8, u64::from(transfer)));
+    }
+    if let Some(full_range) = stream.color_full_range {
+        body.extend_from_slice(&ebml_uint_elem(0x55B9, if full_range { 2 } else { 1 }));
+    }
+    if let Some(ref md) = stream.mastering_display {
+        body.extend_from_slice(&ebml_elem(0x55D0, md));
+    }
+    if body.is_empty() {
+        None
+    } else {
+        Some(ebml_elem(0x55B0, &body))
+    }
+}
+
+pub fn build_ebml_projection_element(stream: &StreamInfo) -> Option<Vec<u8>> {
+    stream.spatial_360.as_ref().map(|p| ebml_elem(0x7670, p))
+}
+
+/// Multiplexes separate video and audio input streams into a single synchronized WebM container with bounded streaming.
+#[allow(clippy::too_many_arguments)]
+pub fn multiplex_ebml_dual_input<R1: Read + Seek, R2: Read + Seek, W: Write>(
+    video_reader: &mut R1,
+    audio_reader: &mut R2,
+    writer: &mut W,
+    video_info: &StreamInfo,
+    audio_info: &StreamInfo,
+    video_payload_offset: u64,
+    video_payload_len: u64,
+    audio_payload_offset: u64,
+    audio_payload_len: u64,
+    duration_seconds: f64,
+) -> RuviResult<()> {
+    let mut hdr = Vec::new();
+    hdr.extend_from_slice(&ebml_uint_elem(0x4286, 1));
+    hdr.extend_from_slice(&ebml_uint_elem(0x42F7, 1));
+    hdr.extend_from_slice(&ebml_uint_elem(0x42F2, 4));
+    hdr.extend_from_slice(&ebml_uint_elem(0x42F3, 8));
+    hdr.extend_from_slice(&ebml_elem(0x4282, b"webm"));
+    hdr.extend_from_slice(&ebml_uint_elem(0x4287, 4));
+    hdr.extend_from_slice(&ebml_uint_elem(0x4285, 2));
+    let ebml_header = ebml_elem(0x1A45_DFA3, &hdr);
+    writer.write_all(&ebml_header)?;
+
+    let mut info_body = Vec::new();
+    info_body.extend_from_slice(&ebml_uint_elem(0x002A_D7B1, 1_000_000));
+    let dur_ms = duration_seconds.max(0.1) * 1000.0;
+    info_body.extend_from_slice(&ebml_elem(0x4489, &dur_ms.to_be_bytes()));
+    info_body.extend_from_slice(&ebml_elem(0x4D80, b"ruvic-pure-rust"));
+    let info_elem = ebml_elem(0x1549_A966, &info_body);
+
+    let mut tracks_body = Vec::new();
+
+    let vcodec = VideoCodec::from_name(&video_info.codec_name).unwrap_or(VideoCodec::Vp9);
+    let v_codec_id = match vcodec {
+        VideoCodec::Vp9 => "V_VP9",
+        VideoCodec::Av1 => "V_AV1",
+        VideoCodec::H265 => "V_MPEGH/ISO/HEVC",
+        _ => "V_MPEG4/ISO/AVC",
+    };
+    let mut video_el = Vec::new();
+    video_el.extend_from_slice(&ebml_uint_elem(
+        0xB0,
+        u64::from(video_info.width.unwrap_or(1280).max(2)),
+    ));
+    video_el.extend_from_slice(&ebml_uint_elem(
+        0xBA,
+        u64::from(video_info.height.unwrap_or(720).max(2)),
+    ));
+    if let Some(colr) = build_ebml_colour_element(video_info) {
+        video_el.extend_from_slice(&colr);
+    }
+    if let Some(proj) = build_ebml_projection_element(video_info) {
+        video_el.extend_from_slice(&proj);
+    }
+    let mut te1 = Vec::new();
+    te1.extend_from_slice(&ebml_uint_elem(0xD7, 1));
+    te1.extend_from_slice(&ebml_uint_elem(0x73C5, 1));
+    te1.extend_from_slice(&ebml_uint_elem(0x83, 1));
+    te1.extend_from_slice(&ebml_elem(0x86, v_codec_id.as_bytes()));
+    te1.extend_from_slice(&ebml_elem(0xE0, &video_el));
+    tracks_body.extend_from_slice(&ebml_elem(0xAE, &te1));
+
+    let acodec = AudioCodec::from_name(&audio_info.codec_name).unwrap_or(AudioCodec::Opus);
+    let a_codec_id = match acodec {
+        AudioCodec::Opus => "A_OPUS",
+        AudioCodec::Vorbis => "A_VORBIS",
+        AudioCodec::Flac => "A_FLAC",
+        AudioCodec::Mp3 => "A_MPEG/L3",
+        _ => "A_AAC",
+    };
+    let mut audio_el = Vec::new();
+    audio_el.extend_from_slice(&ebml_elem(
+        0xB5,
+        &(audio_info.sample_rate.unwrap_or(48000).max(8000) as f64).to_be_bytes(),
+    ));
+    audio_el.extend_from_slice(&ebml_uint_elem(
+        0x9F,
+        u64::from(audio_info.channels.unwrap_or(2).max(1)),
+    ));
+    let mut te2 = Vec::new();
+    te2.extend_from_slice(&ebml_uint_elem(0xD7, 2));
+    te2.extend_from_slice(&ebml_uint_elem(0x73C5, 2));
+    te2.extend_from_slice(&ebml_uint_elem(0x83, 2));
+    te2.extend_from_slice(&ebml_elem(0x86, a_codec_id.as_bytes()));
+    te2.extend_from_slice(&ebml_elem(0xE1, &audio_el));
+    tracks_body.extend_from_slice(&ebml_elem(0xAE, &te2));
+
+    let tracks_elem = ebml_elem(0x1654_AE6B, &tracks_body);
+
+    let seg_id = [0x18, 0x53, 0x80, 0x67];
+    let seg_size = [0x01, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF];
+    writer.write_all(&seg_id)?;
+    writer.write_all(&seg_size)?;
+    writer.write_all(&info_elem)?;
+    writer.write_all(&tracks_elem)?;
+
+    let timecode_el = ebml_uint_elem(0xE7, 0);
+    let cluster_hdr = [0x1F, 0x43, 0xB6, 0x75];
+    writer.write_all(&cluster_hdr)?;
+
+    let block1_hdr_len = 1 + encode_vint_size(4 + video_payload_len).len() + 4;
+    let block2_hdr_len = 1 + encode_vint_size(4 + audio_payload_len).len() + 4;
+    let cluster_data_size = timecode_el.len() as u64
+        + block1_hdr_len as u64
+        + video_payload_len
+        + block2_hdr_len as u64
+        + audio_payload_len;
+
+    writer.write_all(&encode_vint_size(cluster_data_size))?;
+    writer.write_all(&timecode_el)?;
+
+    // Video block
+    writer.write_all(&[0xA3])?;
+    writer.write_all(&encode_vint_size(4 + video_payload_len))?;
+    writer.write_all(&[0x81, 0x00, 0x00, 0x80])?;
+    video_reader.seek(SeekFrom::Start(video_payload_offset))?;
+    copy_chunked(video_reader, writer, video_payload_len, 64 * 1024)?;
+
+    // Audio block
+    writer.write_all(&[0xA3])?;
+    writer.write_all(&encode_vint_size(4 + audio_payload_len))?;
+    writer.write_all(&[0x82, 0x00, 0x00, 0x80])?;
+    audio_reader.seek(SeekFrom::Start(audio_payload_offset))?;
+    copy_chunked(audio_reader, writer, audio_payload_len, 64 * 1024)?;
+
+    Ok(())
 }

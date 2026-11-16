@@ -35,6 +35,7 @@ pub async fn execute_trim(
     let job = ConversionJob {
         kind: OperationKind::Trim,
         input: req.input,
+        secondary_input: None,
         output: req.output,
         container,
         overwrite,

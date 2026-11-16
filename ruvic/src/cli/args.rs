@@ -190,6 +190,14 @@ pub struct RemuxArgs {
     /// Explicit audio stream index
     #[arg(long, value_name = "INDEX")]
     pub audio_stream: Option<usize>,
+
+    /// Optional separate video input file (for dual-input DASH remux)
+    #[arg(long, value_name = "VIDEO_PATH")]
+    pub video: Option<PathBuf>,
+
+    /// Optional separate audio input file (for dual-input DASH remux)
+    #[arg(long, value_name = "AUDIO_PATH")]
+    pub audio: Option<PathBuf>,
 }
 
 #[derive(Debug, Args)]

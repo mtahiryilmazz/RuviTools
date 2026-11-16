@@ -42,6 +42,7 @@ pub async fn execute_extract_audio(
     let job = ConversionJob {
         kind: OperationKind::ExtractAudio,
         input: req.input,
+        secondary_input: None,
         output: req.output,
         container,
         overwrite,

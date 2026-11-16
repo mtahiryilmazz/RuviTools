@@ -393,11 +393,11 @@ async fn redacts_credentials_and_tokens_across_manifests_json_output_and_error_l
     let base_no_scheme = server.base_url.strip_prefix("http://").unwrap();
     let authed_ok_url = format!(
         "http://myuser:MY_SECRET_PASS@{base_no_scheme}/protected.mp4\
-         ?token=T1&sig=S2&key=K3&auth=A4&secret=X5&hdnea=H6&policy=P7&view=public"
+         ?token=TOK_A1&sig=SIG_B2&key=KEY_C3&auth=AUTH_D4&secret=SEC_E5&hdnea=HDNEA_F6&policy=POL_G7&view=public"
     );
     let authed_err_url = format!(
         "http://myuser:MY_SECRET_PASS@{base_no_scheme}/denied.mp4\
-         ?token=T1&sig=S2&key=K3&auth=A4&secret=X5&hdnea=H6&policy=P7"
+         ?token=TOK_A1&sig=SIG_B2&key=KEY_C3&auth=AUTH_D4&secret=SEC_E5&hdnea=HDNEA_F6&policy=POL_G7"
     );
 
     let tmp = tempfile::tempdir().unwrap();
@@ -416,13 +416,13 @@ async fn redacts_credentials_and_tokens_across_manifests_json_output_and_error_l
     for leak in [
         "myuser",
         "MY_SECRET_PASS",
-        "T1",
-        "S2",
-        "K3",
-        "A4",
-        "X5",
-        "H6",
-        "P7",
+        "TOK_A1",
+        "SIG_B2",
+        "KEY_C3",
+        "AUTH_D4",
+        "SEC_E5",
+        "HDNEA_F6",
+        "POL_G7",
     ] {
         assert!(
             !info_text.contains(leak),
@@ -455,13 +455,13 @@ async fn redacts_credentials_and_tokens_across_manifests_json_output_and_error_l
     for leak in [
         "myuser",
         "MY_SECRET_PASS",
-        "T1",
-        "S2",
-        "K3",
-        "A4",
-        "X5",
-        "H6",
-        "P7",
+        "TOK_A1",
+        "SIG_B2",
+        "KEY_C3",
+        "AUTH_D4",
+        "SEC_E5",
+        "HDNEA_F6",
+        "POL_G7",
     ] {
         assert!(
             !stdout_str.contains(leak),
@@ -486,13 +486,13 @@ async fn redacts_credentials_and_tokens_across_manifests_json_output_and_error_l
     for leak in [
         "myuser",
         "MY_SECRET_PASS",
-        "T1",
-        "S2",
-        "K3",
-        "A4",
-        "X5",
-        "H6",
-        "P7",
+        "TOK_A1",
+        "SIG_B2",
+        "KEY_C3",
+        "AUTH_D4",
+        "SEC_E5",
+        "HDNEA_F6",
+        "POL_G7",
     ] {
         assert!(
             !err_stderr.contains(leak),

@@ -41,7 +41,14 @@ pub struct HandoffManifest {
     pub producer: Option<ManifestProducer>,
     #[serde(default)]
     pub source: Option<ManifestSource>,
-    pub output: ManifestOutput,
+    #[serde(default)]
+    pub output: Option<ManifestOutput>,
+    /// Dual-stream (DASH) handoff: primary (video) input path.
+    #[serde(default)]
+    pub primary_input: Option<String>,
+    /// Dual-stream (DASH) handoff: secondary (audio) input path.
+    #[serde(default)]
+    pub secondary_input: Option<String>,
     #[serde(default)]
     pub streams: Vec<ManifestStream>,
     #[serde(default)]
@@ -92,12 +99,29 @@ impl HandoffManifest {
                 manifest.schema_version
             )));
         }
-        if manifest.output.path.trim().is_empty() {
+        if manifest.primary_path().is_none() {
             return Err(RuviError::InvalidArgument(
-                "manifest output.path must not be empty".to_string(),
+                "manifest must provide a non-empty output.path or primary_input".to_string(),
             ));
         }
         Ok(manifest)
+    }
+
+    /// Primary media path: `primary_input` (dual-stream) or `output.path` (single file).
+    pub fn primary_path(&self) -> Option<&str> {
+        self.primary_input
+            .as_deref()
+            .or(self.output.as_ref().map(|o| o.path.as_str()))
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
+    }
+
+    /// Secondary (audio) media path for dual-stream handoffs.
+    pub fn secondary_path(&self) -> Option<&str> {
+        self.secondary_input
+            .as_deref()
+            .map(str::trim)
+            .filter(|p| !p.is_empty())
     }
 }
 

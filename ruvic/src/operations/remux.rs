@@ -11,6 +11,7 @@ use crate::operations::run_job_pipeline;
 #[derive(Debug, Clone)]
 pub struct RemuxRequest {
     pub input: PathBuf,
+    pub secondary_input: Option<PathBuf>,
     pub output: PathBuf,
     pub overwrite: bool,
     pub video_stream: Option<usize>,
@@ -33,6 +34,7 @@ pub async fn execute_remux(
     let job = ConversionJob {
         kind: OperationKind::Remux,
         input: req.input,
+        secondary_input: req.secondary_input,
         output: req.output,
         container,
         overwrite,

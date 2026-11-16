@@ -20,6 +20,7 @@ pub fn init_logging(verbose: u8, quiet: bool, no_color: bool) {
         .with_env_filter(filter)
         .with_writer(std::io::stderr)
         .with_ansi(!no_color)
+        .without_time()
         .try_init();
 }
 

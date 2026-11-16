@@ -103,6 +103,7 @@ pub fn parse_ffprobe_json(json_str: &str, fallback_path: &str) -> RuviResult<Med
                 bit_rate: s.bit_rate.as_deref().and_then(parse_u64),
                 language: s.tags.and_then(|t| t.language),
                 pixel_format: s.pix_fmt,
+                ..Default::default()
             }
         })
         .collect();

@@ -223,3 +223,5 @@ pub fn ruvic_cmd(isolated_dir: &Path) -> assert_cmd::Command {
         .env("RUVI_STATE_DIR", isolated_dir.join("state"));
     cmd
 }
+
+pub mod synthetic_media;

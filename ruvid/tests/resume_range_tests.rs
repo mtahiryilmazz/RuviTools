@@ -161,3 +161,60 @@ async fn resume_from_checkpoint_downloads_only_missing_chunks_and_rejects_etag_c
         .code(8);
     assert!(!stale_out.exists());
 }
+
+#[tokio::test]
+async fn stream_without_initial_content_length_upgrades_to_parallel_range() {
+    let server = MockHttpServer::start().await;
+    let total_size = 40 * 1024usize;
+    let payload: Vec<u8> = (0..total_size).map(|i| ((i * 11) % 249) as u8).collect();
+    server.set_route(
+        "/yt_progressive.mp4",
+        RoutePayload::bytes(payload.clone(), "video/mp4"),
+    );
+
+    // Simulate a YouTube progressive format where Innertube/player omits `contentLength`
+    let watch_html = format!(
+        r#"<html><head><title>Dynamic Range Test</title></head><body>
+        <script>
+        var ytInitialPlayerResponse = {{
+          "playabilityStatus": {{"status": "OK"}},
+          "videoDetails": {{"title": "Dynamic Range Video", "videoId": "dyn123"}},
+          "streamingData": {{
+            "formats": [
+              {{
+                "itag": 18,
+                "url": "{}/yt_progressive.mp4",
+                "mimeType": "video/mp4; codecs=\"avc1.42001E, mp4a.40.2\"",
+                "width": 320,
+                "height": 240,
+                "bitrate": 250000
+              }}
+            ]
+          }}
+        }};
+        </script></body></html>"#,
+        server.base_url
+    );
+    server.set_route("/watch", RoutePayload::text(&watch_html, "text/html"));
+
+    let tmp = tempfile::tempdir().unwrap();
+    let out_path = tmp.path().join("yt_dyn.mp4");
+
+    common::ruvid_cmd(tmp.path())
+        .env("RUVID_DISABLE_YTDLP", "1")
+        .args([
+            "get",
+            &format!("{}/watch", server.base_url),
+            "--jobs",
+            "4",
+            "-o",
+            out_path.to_str().unwrap(),
+            "--json",
+        ])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains(r#""chunks_total": 8"#))
+        .stdout(predicate::str::contains(r#""bytes_downloaded": 40960"#));
+
+    assert_eq!(std::fs::read(&out_path).unwrap(), payload);
+}

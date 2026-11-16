@@ -16,9 +16,17 @@ pub struct RuviManifest {
     pub streams: Vec<ManifestStream>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub subtitles: Vec<ManifestSubtitle>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dual_stream: Option<DualStreamHandoff>,
     pub created_at: String,
     #[serde(flatten)]
     pub extra: BTreeMap<String, Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DualStreamHandoff {
+    pub video_path: String,
+    pub audio_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]

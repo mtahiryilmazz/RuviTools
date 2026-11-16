@@ -7,8 +7,8 @@ pub mod trim;
 
 use tokio_util::sync::CancellationToken;
 
-use crate::backend::MediaBackend;
-use crate::domain::conversion_job::{ConversionJob, OperationResult};
+use crate::backend::{BackendCapabilities, MediaBackend};
+use crate::domain::conversion_job::{ConversionJob, OperationKind, OperationResult};
 use crate::error::RuviResult;
 use crate::planner::{plan_conversion, validate_io_paths};
 use crate::probe::ProbeService;
@@ -26,7 +26,15 @@ pub async fn run_job_pipeline(
 
     let probe_svc = ProbeService::new(backend);
     let source_info = probe_svc.probe_file(&job.input).await?;
-    let caps = backend.capabilities().await?;
+    let needs_caps = matches!(
+        job.kind,
+        OperationKind::Convert | OperationKind::ExtractAudio
+    ) || (job.kind == OperationKind::Trim && job.reencode);
+    let caps = if needs_caps {
+        backend.capabilities().await?
+    } else {
+        BackendCapabilities::default()
+    };
 
     let temp_path = create_temp_output_path(&job.output)?;
     let plan = plan_conversion(job, &source_info, &caps, temp_path.clone())?;

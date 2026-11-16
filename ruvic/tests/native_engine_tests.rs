@@ -41,6 +41,7 @@ fn build_sample_mp4_1080p(duration_seconds: f64) -> Vec<u8> {
         video: Some((VideoCodec::H264, 1920, 1080)),
         audio: Some((AudioCodec::Aac, 48_000, 2)),
         mdat_payload: b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ_NATIVE_MP4_PAYLOAD",
+        video_aux: None,
     })
 }
 
@@ -269,6 +270,8 @@ fn native_remux_mp4_to_mkv_and_rejects_vp9_webm_to_mp4() {
         video: Some((VideoCodec::Vp9, 1280, 720)),
         audio: Some((AudioCodec::Opus, 48_000, 2)),
         payload: b"VP9_OPUS_NATIVE_PAYLOAD",
+        video_colour: None,
+        video_projection: None,
     });
     std::fs::write(&input_webm, webm_bytes).unwrap();
 

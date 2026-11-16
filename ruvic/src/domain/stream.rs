@@ -27,6 +27,45 @@ pub struct StreamInfo {
     pub bit_rate: Option<u64>,
     pub language: Option<String>,
     pub pixel_format: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_primaries: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_transfer: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_matrix: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub color_full_range: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub mastering_display: Option<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub content_light_level: Option<Vec<u8>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub spatial_360: Option<Vec<u8>>,
+}
+
+impl Default for StreamInfo {
+    fn default() -> Self {
+        Self {
+            index: 0,
+            kind: StreamKind::Unknown,
+            codec_name: "unknown".to_string(),
+            width: None,
+            height: None,
+            fps: None,
+            sample_rate: None,
+            channels: None,
+            bit_rate: None,
+            language: None,
+            pixel_format: None,
+            color_primaries: None,
+            color_transfer: None,
+            color_matrix: None,
+            color_full_range: None,
+            mastering_display: None,
+            content_light_level: None,
+            spatial_360: None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

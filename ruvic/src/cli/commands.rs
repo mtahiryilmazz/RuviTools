@@ -117,13 +117,16 @@ pub async fn dispatch(cli: Cli) -> RuviResult<()> {
             Ok(())
         }
         Commands::Remux(args) => {
-            let input = resolve_input(args.input, args.manifest.as_deref())?;
+            let primary_input = args.input.or(args.video);
+            let (input, manifest_secondary) =
+                resolve_inputs(primary_input, args.manifest.as_deref())?;
             let backend = select_backend(&config, &overrides)?;
             let res = execute_remux(
                 backend.as_ref(),
                 &config,
                 RemuxRequest {
                     input,
+                    secondary_input: args.audio.or(manifest_secondary),
                     output: args.output,
                     overwrite: args.overwrite,
                     video_stream: args.video_stream,
@@ -239,15 +242,26 @@ pub async fn dispatch(cli: Cli) -> RuviResult<()> {
 }
 
 fn resolve_input(input: Option<PathBuf>, manifest: Option<&Path>) -> RuviResult<PathBuf> {
+    resolve_inputs(input, manifest).map(|(primary, _)| primary)
+}
+
+fn resolve_inputs(
+    input: Option<PathBuf>,
+    manifest: Option<&Path>,
+) -> RuviResult<(PathBuf, Option<PathBuf>)> {
     if let Some(m_path) = manifest {
         let loaded = HandoffManifest::load_from_path(m_path)?;
-        return Ok(PathBuf::from(loaded.output.path));
+        let primary = loaded.primary_path().map(PathBuf::from).ok_or_else(|| {
+            RuviError::InvalidArgument("manifest has no primary input".to_string())
+        })?;
+        return Ok((primary, loaded.secondary_path().map(PathBuf::from)));
     }
-    input.ok_or_else(|| {
+    let input = input.ok_or_else(|| {
         RuviError::InvalidArgument(
             "either <INPUT> or --manifest <PATH> must be provided".to_string(),
         )
-    })
+    })?;
+    Ok((input, None))
 }
 
 fn handle_config(
@@ -436,17 +450,12 @@ async fn handle_doctor(
             "config: {} (exists={})",
             report.config_path, report.config_exists
         );
-        let backend_label = if explicit_ffmpeg {
+        println!(
+            "backend: {} ({})",
             report
                 .ffmpeg_path
                 .as_deref()
-                .unwrap_or("ffmpeg override (not found)")
-        } else {
-            "built-in pure-Rust engine"
-        };
-        println!(
-            "backend: {} ({})",
-            backend_label,
+                .unwrap_or("built-in pure-Rust engine"),
             report.ffmpeg_version.as_deref().unwrap_or("unavailable")
         );
         println!("encoders available: {}", report.encoders_count);

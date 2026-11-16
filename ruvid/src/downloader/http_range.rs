@@ -15,6 +15,7 @@ use crate::downloader::retry::{RetryableError, run_with_retry};
 use crate::downloader::scheduler::DownloadScheduler;
 use crate::downloader::throttle::RateLimiter;
 use crate::error::{RuviError, RuviResult};
+use crate::resolver::direct_http::probe_http_resource;
 use crate::resolver::{ResolveContext, validate_url_security};
 use crate::storage::{DownloadCheckpoint, checkpoint_path_for, commit_part_file, part_file_path};
 use crate::telemetry::DownloadProgress;
@@ -119,6 +120,27 @@ pub async fn download_direct_http(
 
     let part_path = part_file_path(&plan.output_path);
     let ckpt_path = checkpoint_path_for(&part_path);
+
+    let (total_bytes, accept_ranges, etag, last_modified) = if total_bytes.is_none() {
+        if let Ok(meta) = probe_http_resource(ctx, url).await {
+            if let Some(t) = meta.total_bytes {
+                progress.set_total(t);
+            }
+            (
+                meta.total_bytes.or(total_bytes),
+                meta.accept_ranges || accept_ranges,
+                etag.or(meta.etag),
+                last_modified.or(meta.last_modified),
+            )
+        } else {
+            (total_bytes, accept_ranges, etag, last_modified)
+        }
+    } else {
+        if let Some(t) = total_bytes {
+            progress.set_total(t);
+        }
+        (total_bytes, accept_ranges, etag, last_modified)
+    };
 
     let can_parallel_range =
         accept_ranges && plan.jobs > 1 && total_bytes.is_some_and(|t| t >= 16 * 1024);
@@ -237,6 +259,7 @@ pub async fn download_direct_http(
                 Err(ChunkResultError::ServerIgnoredRange) => {
                     let _ = std::fs::remove_file(&part_path);
                     let _ = std::fs::remove_file(&ckpt_path);
+                    progress.set_initial(0);
                     return download_single_stream(
                         ctx,
                         plan,
@@ -472,6 +495,9 @@ async fn download_single_stream(
             }
 
             let resp_content_len = resp.content_length();
+            if let Some(cl) = resp_content_len {
+                progress.set_total(cl);
+            }
             if let (Some(exp), Some(actual_cl)) = (expected_total, resp_content_len)
                 && exp != actual_cl
             {

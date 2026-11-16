@@ -1,5 +1,7 @@
 #![allow(dead_code)]
 
+pub mod synthetic_media;
+
 use std::collections::HashMap;
 use std::path::Path;
 use std::sync::{Arc, Mutex};

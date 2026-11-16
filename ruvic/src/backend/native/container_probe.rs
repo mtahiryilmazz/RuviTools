@@ -1,7 +1,8 @@
+use std::io::{Read, Seek, SeekFrom};
 use std::path::Path;
 
 use crate::backend::native::ebml::{is_ebml, parse_ebml_bytes};
-use crate::backend::native::mp4_atoms::parse_mp4_bytes;
+use crate::backend::native::mp4_atoms::{TrackSampleTable, parse_moov, parse_mp4_bytes};
 use crate::domain::media_info::{ContainerInfo, MediaInfo};
 use crate::domain::stream::{StreamInfo, StreamKind};
 use crate::error::{RuviError, RuviResult};
@@ -10,17 +11,193 @@ use crate::error::{RuviError, RuviResult};
 pub struct ProbedSource {
     pub info: MediaInfo,
     pub payload_slice: (usize, usize),
+    pub track_tables: Vec<TrackSampleTable>,
+    pub moov_offset: usize,
+    pub moov_len: usize,
+    pub ftyp_len: usize,
+}
+
+impl ProbedSource {
+    pub fn new(info: MediaInfo, payload_slice: (usize, usize)) -> Self {
+        Self {
+            info,
+            payload_slice,
+            track_tables: Vec::new(),
+            moov_offset: 0,
+            moov_len: 0,
+            ftyp_len: 0,
+        }
+    }
 }
 
 pub fn probe_media_file(path: &Path) -> RuviResult<ProbedSource> {
-    let data = std::fs::read(path).map_err(|err| {
+    let mut file = std::fs::File::open(path).map_err(|err| {
         RuviError::Filesystem(format!(
             "failed reading media file {}: {err}",
             path.display()
         ))
     })?;
+    let file_len = file.metadata().map(|m| m.len()).unwrap_or(0);
+    if file_len == 0 {
+        return Err(RuviError::Integrity(format!(
+            "media file is empty: {}",
+            path.display()
+        )));
+    }
     let label = path.to_string_lossy().into_owned();
-    probe_media_bytes(&data, &label, path.extension().and_then(|s| s.to_str()))
+    let ext_hint = path.extension().and_then(|s| s.to_str());
+
+    let mut header = [0u8; 16];
+    let n = file.read(&mut header).unwrap_or(0);
+    file.seek(SeekFrom::Start(0))?;
+
+    if n >= 8 && &header[4..8] == b"ftyp" {
+        return probe_mp4_stream(&mut file, file_len, &label);
+    }
+
+    if n >= 4 && is_ebml(&header[..n]) {
+        return probe_ebml_stream(&mut file, file_len, &label);
+    }
+
+    let probe_limit = file_len.min(2 * 1024 * 1024) as usize;
+    let mut probe_buf = vec![0u8; probe_limit];
+    file.read_exact(&mut probe_buf)?;
+    let mut probed = probe_media_bytes(&probe_buf, &label, ext_hint)?;
+    probed.info.container.size_bytes = Some(file_len);
+    if probed.payload_slice.1 >= probe_limit {
+        probed.payload_slice.1 = file_len as usize;
+    }
+    Ok(probed)
+}
+
+fn probe_mp4_stream<R: Read + Seek>(
+    reader: &mut R,
+    file_len: u64,
+    path_label: &str,
+) -> RuviResult<ProbedSource> {
+    let mut pos = 0u64;
+    let mut duration_seconds: Option<f64> = None;
+    let mut streams: Vec<StreamInfo> = Vec::new();
+    let mut track_tables: Vec<TrackSampleTable> = Vec::new();
+    let mut mdat_offset = 0usize;
+    let mut mdat_len = 0usize;
+    let mut saw_moov = false;
+    let mut moov_offset = 0usize;
+    let mut moov_len = 0usize;
+    let mut ftyp_len = 0usize;
+
+    while pos + 8 <= file_len {
+        reader.seek(SeekFrom::Start(pos))?;
+        let mut hdr = [0u8; 16];
+        let n = reader.read(&mut hdr)?;
+        if n < 8 {
+            break;
+        }
+        let size32 = u32::from_be_bytes([hdr[0], hdr[1], hdr[2], hdr[3]]) as u64;
+        let box_type = [hdr[4], hdr[5], hdr[6], hdr[7]];
+        let (total_size, header_len) = if size32 == 1 {
+            if n < 16 {
+                return Err(RuviError::Integrity("truncated MP4 64-bit box".to_string()));
+            }
+            let s64 = u64::from_be_bytes(hdr[8..16].try_into().unwrap());
+            (s64, 16u64)
+        } else if size32 == 0 {
+            (file_len - pos, 8u64)
+        } else {
+            (size32, 8u64)
+        };
+
+        if total_size < header_len || total_size > file_len - pos {
+            return Err(RuviError::Integrity(format!(
+                "invalid or truncated MP4 box '{}'",
+                String::from_utf8_lossy(&box_type)
+            )));
+        }
+
+        let payload_start = pos + header_len;
+        let box_end = pos + total_size;
+
+        match &box_type {
+            b"ftyp" => {
+                if ftyp_len == 0 {
+                    ftyp_len = total_size as usize;
+                }
+            }
+            b"moov" => {
+                saw_moov = true;
+                moov_offset = pos as usize;
+                moov_len = total_size as usize;
+                let moov_payload_len = (total_size - header_len) as usize;
+                let mut moov_payload = vec![0u8; moov_payload_len];
+                reader.seek(SeekFrom::Start(payload_start))?;
+                reader.read_exact(&mut moov_payload)?;
+                parse_moov(
+                    &moov_payload,
+                    &mut duration_seconds,
+                    &mut streams,
+                    &mut track_tables,
+                )?;
+            }
+            b"mdat" => {
+                mdat_offset = payload_start as usize;
+                mdat_len = (total_size - header_len) as usize;
+            }
+            _ => {}
+        }
+
+        pos = box_end;
+    }
+
+    if !saw_moov || streams.is_empty() {
+        return Err(RuviError::Integrity(
+            "invalid MP4 container: missing moov atom or media tracks".to_string(),
+        ));
+    }
+
+    Ok(ProbedSource {
+        info: MediaInfo {
+            path: path_label.to_string(),
+            container: ContainerInfo {
+                format_name: "mov,mp4,m4a,3gp,3g2,mj2".to_string(),
+                format_long_name: Some("QuickTime / ISO-BMFF MP4".to_string()),
+                duration_seconds,
+                size_bytes: Some(file_len),
+                bit_rate: duration_seconds
+                    .filter(|d| *d > 0.0)
+                    .map(|d| ((file_len as f64 * 8.0) / d) as u64),
+            },
+            streams,
+            chapters: Vec::new(),
+        },
+        payload_slice: (mdat_offset, mdat_offset + mdat_len),
+        track_tables,
+        moov_offset,
+        moov_len,
+        ftyp_len,
+    })
+}
+
+fn probe_ebml_stream<R: Read + Seek>(
+    reader: &mut R,
+    file_len: u64,
+    path_label: &str,
+) -> RuviResult<ProbedSource> {
+    let probe_limit = file_len.min(2 * 1024 * 1024) as usize;
+    let mut probe_buf = vec![0u8; probe_limit];
+    reader.seek(SeekFrom::Start(0))?;
+    reader.read_exact(&mut probe_buf)?;
+
+    let mut info = parse_ebml_bytes(&probe_buf, path_label)?;
+    info.container.size_bytes = Some(file_len);
+
+    Ok(ProbedSource {
+        info,
+        payload_slice: (0, file_len as usize),
+        track_tables: Vec::new(),
+        moov_offset: 0,
+        moov_len: 0,
+        ftyp_len: 0,
+    })
 }
 
 pub fn probe_media_bytes(
@@ -40,52 +217,41 @@ pub fn probe_media_bytes(
         return Ok(ProbedSource {
             info: parsed.info,
             payload_slice: (parsed.mdat_offset, parsed.mdat_offset + parsed.mdat_len),
+            track_tables: parsed.track_tables,
+            moov_offset: parsed.moov_offset,
+            moov_len: parsed.moov_len,
+            ftyp_len: parsed.ftyp_len,
         });
     }
 
     // 2. EBML (MKV / WebM)
     if is_ebml(data) {
         let info = parse_ebml_bytes(data, path_label)?;
-        return Ok(ProbedSource {
-            info,
-            payload_slice: (0, data.len()),
-        });
+        return Ok(ProbedSource::new(info, (0, data.len())));
     }
 
     // 3. RIFF (WAV or WebP)
     if data.len() >= 12 && &data[0..4] == b"RIFF" {
         if &data[8..12] == b"WAVE" {
             let (info, data_slice) = parse_wav(data, path_label)?;
-            return Ok(ProbedSource {
-                info,
-                payload_slice: data_slice,
-            });
+            return Ok(ProbedSource::new(info, data_slice));
         }
         if &data[8..12] == b"WEBP" {
             let info = parse_webp(data, path_label)?;
-            return Ok(ProbedSource {
-                info,
-                payload_slice: (0, data.len()),
-            });
+            return Ok(ProbedSource::new(info, (0, data.len())));
         }
     }
 
     // 4. FLAC (`fLaC`)
     if data.len() >= 42 && &data[0..4] == b"fLaC" {
         let info = parse_flac(data, path_label)?;
-        return Ok(ProbedSource {
-            info,
-            payload_slice: (42.min(data.len()), data.len()),
-        });
+        return Ok(ProbedSource::new(info, (42.min(data.len()), data.len())));
     }
 
     // 5. Ogg (`OggS`)
     if data.len() >= 28 && &data[0..4] == b"OggS" {
         let info = parse_ogg(data, path_label)?;
-        return Ok(ProbedSource {
-            info,
-            payload_slice: (28.min(data.len()), data.len()),
-        });
+        return Ok(ProbedSource::new(info, (28.min(data.len()), data.len())));
     }
 
     // 6. PNG / JPEG images
@@ -97,8 +263,8 @@ pub fn probe_media_bytes(
                 "invalid PNG image dimensions in {path_label}"
             )));
         }
-        return Ok(ProbedSource {
-            info: MediaInfo {
+        return Ok(ProbedSource::new(
+            MediaInfo {
                 path: path_label.to_string(),
                 container: ContainerInfo {
                     format_name: "png_pipe".to_string(),
@@ -119,17 +285,18 @@ pub fn probe_media_bytes(
                     bit_rate: None,
                     language: None,
                     pixel_format: Some("rgb24".to_string()),
+                    ..Default::default()
                 }],
                 chapters: Vec::new(),
             },
-            payload_slice: (0, data.len()),
-        });
+            (0, data.len()),
+        ));
     }
 
     if data.len() >= 4 && data[0] == 0xFF && data[1] == 0xD8 && data[2] == 0xFF {
         let (w, h) = parse_jpeg_dimensions(data);
-        return Ok(ProbedSource {
-            info: MediaInfo {
+        return Ok(ProbedSource::new(
+            MediaInfo {
                 path: path_label.to_string(),
                 container: ContainerInfo {
                     format_name: "jpeg_pipe".to_string(),
@@ -150,33 +317,28 @@ pub fn probe_media_bytes(
                     bit_rate: None,
                     language: None,
                     pixel_format: Some("yuvj420p".to_string()),
+                    ..Default::default()
                 }],
                 chapters: Vec::new(),
             },
-            payload_slice: (0, data.len()),
-        });
+            (0, data.len()),
+        ));
     }
 
     // 7. MP3 (ID3 tag or MPEG sync)
     if let Some(info) = try_parse_mp3(data, path_label) {
-        return Ok(ProbedSource {
-            info,
-            payload_slice: (0, data.len()),
-        });
+        return Ok(ProbedSource::new(info, (0, data.len())));
     }
 
     // 8. AAC ADTS (`0xFFF1` or `0xFFF9`)
     if let Some(info) = try_parse_adts(data, path_label) {
-        return Ok(ProbedSource {
-            info,
-            payload_slice: (0, data.len()),
-        });
+        return Ok(ProbedSource::new(info, (0, data.len())));
     }
 
     // 9. MPEG-TS (`0x47` sync byte)
     if data.len() >= 188 && data[0] == 0x47 && (data.len() < 376 || data[188] == 0x47) {
-        return Ok(ProbedSource {
-            info: MediaInfo {
+        return Ok(ProbedSource::new(
+            MediaInfo {
                 path: path_label.to_string(),
                 container: ContainerInfo {
                     format_name: "mpegts".to_string(),
@@ -198,6 +360,7 @@ pub fn probe_media_bytes(
                         bit_rate: None,
                         language: None,
                         pixel_format: Some("yuv420p".to_string()),
+                        ..Default::default()
                     },
                     StreamInfo {
                         index: 1,
@@ -211,12 +374,13 @@ pub fn probe_media_bytes(
                         bit_rate: None,
                         language: None,
                         pixel_format: None,
+                        ..Default::default()
                     },
                 ],
                 chapters: Vec::new(),
             },
-            payload_slice: (0, data.len()),
-        });
+            (0, data.len()),
+        ));
     }
 
     let _ = ext_hint;
@@ -283,6 +447,7 @@ fn parse_webp(data: &[u8], path_label: &str) -> RuviResult<MediaInfo> {
             bit_rate: None,
             language: None,
             pixel_format: None,
+            ..Default::default()
         }],
         chapters: Vec::new(),
     })
@@ -345,6 +510,7 @@ fn parse_wav(data: &[u8], path_label: &str) -> RuviResult<(MediaInfo, (usize, us
             bit_rate: Some(u64::from(byte_rate) * 8),
             language: None,
             pixel_format: None,
+            ..Default::default()
         }],
         chapters: Vec::new(),
     };
@@ -393,6 +559,7 @@ fn parse_flac(data: &[u8], path_label: &str) -> RuviResult<MediaInfo> {
             bit_rate: None,
             language: None,
             pixel_format: None,
+            ..Default::default()
         }],
         chapters: Vec::new(),
     })
@@ -490,6 +657,7 @@ fn parse_ogg(data: &[u8], path_label: &str) -> RuviResult<MediaInfo> {
             bit_rate: None,
             language: None,
             pixel_format: None,
+            ..Default::default()
         }],
         chapters: Vec::new(),
     })
@@ -566,6 +734,7 @@ fn try_parse_mp3(data: &[u8], path_label: &str) -> Option<MediaInfo> {
             bit_rate: Some(bitrate_bps),
             language: None,
             pixel_format: None,
+            ..Default::default()
         }],
         chapters: Vec::new(),
     })
@@ -608,6 +777,7 @@ fn try_parse_adts(data: &[u8], path_label: &str) -> Option<MediaInfo> {
             bit_rate: Some(128_000),
             language: None,
             pixel_format: None,
+            ..Default::default()
         }],
         chapters: Vec::new(),
     })

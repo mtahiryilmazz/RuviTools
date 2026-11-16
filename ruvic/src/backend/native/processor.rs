@@ -1,13 +1,21 @@
+use std::fs::File;
+use std::io::{BufWriter, Read, Seek, SeekFrom, Write};
 use std::time::Instant;
 
 use tokio_util::sync::CancellationToken;
 
 use crate::backend::native::container_probe::probe_media_file;
-use crate::backend::native::ebml::{EbmlBuildSpec, build_ebml_bytes};
-use crate::backend::native::mp4_atoms::{Mp4BuildSpec, build_mp4_bytes};
+use crate::backend::native::ebml::{
+    EbmlBuildSpec, build_ebml_bytes, build_ebml_colour_element, build_ebml_projection_element,
+    multiplex_ebml_dual_input,
+};
+use crate::backend::native::mp4_atoms::{
+    Mp4BuildSpec, TrackAuxBoxes, build_mp4_bytes, copy_chunked, extract_aac_adts_stream,
+    multiplex_mp4_dual_input, rewrite_mp4_faststart, validate_moov_integrity,
+};
 use crate::backend::{ProgressSink, ProgressUpdate};
 use crate::domain::conversion_job::{ExecutionReport, OperationKind};
-use crate::domain::stream::{AudioCodec, ContainerFormat, StreamKind, VideoCodec};
+use crate::domain::stream::{AudioCodec, ContainerFormat, StreamInfo, StreamKind, VideoCodec};
 use crate::error::{RuviError, RuviResult};
 use crate::planner::ConversionPlan;
 use crate::planner::validation::parse_timestamp_seconds;
@@ -24,10 +32,18 @@ pub async fn execute_native_plan(
         ));
     }
 
-    let source_bytes = std::fs::read(&plan.input).map_err(|err| {
-        RuviError::Filesystem(format!("failed reading {}: {err}", plan.input.display()))
+    let mut src_file = File::open(&plan.input).map_err(|err| {
+        RuviError::Filesystem(format!("failed opening {}: {err}", plan.input.display()))
     })?;
+    let src_file_len = src_file.metadata().map(|m| m.len()).unwrap_or(0);
+
     let probed = probe_media_file(&plan.input)?;
+    verify_source_integrity(
+        &mut src_file,
+        src_file_len,
+        probed.moov_offset,
+        probed.moov_len,
+    )?;
     let info = &probed.info;
 
     let src_dur = info.container.duration_seconds.unwrap_or(10.0).max(0.2);
@@ -63,14 +79,13 @@ pub async fn execute_native_plan(
     let sr = src_audio.and_then(|a| a.sample_rate).unwrap_or(48_000);
     let ch = src_audio.and_then(|a| a.channels).unwrap_or(2);
 
-    let raw_payload = &source_bytes[probed.payload_slice.0..probed.payload_slice.1];
-    let (effective_duration, effective_payload) = if plan.operation == OperationKind::Trim {
+    let effective_duration = if plan.operation == OperationKind::Trim {
         let start_s = plan
             .start_time
             .as_deref()
             .and_then(parse_timestamp_seconds)
             .unwrap_or(0.0);
-        let target_dur = if let Some(d) = plan.duration_seconds {
+        if let Some(d) = plan.duration_seconds {
             d.min((src_dur - start_s).max(0.1))
         } else if let Some(ref end_str) = plan.end_time {
             let end_s = parse_timestamp_seconds(end_str)
@@ -79,16 +94,232 @@ pub async fn execute_native_plan(
             (end_s - start_s).max(0.1)
         } else {
             src_dur
-        };
-        let slice = slice_payload_for_trim(raw_payload, src_dur, start_s, target_dur);
-        (target_dur, slice)
+        }
     } else {
-        (src_dur, raw_payload)
+        src_dur
     };
 
     emit_tick(progress, effective_duration, 0.25);
     if cancel.is_cancelled() {
         return Err(RuviError::Cancelled("operation cancelled".to_string()));
+    }
+
+    if let Some(parent) = plan
+        .temp_output
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+    {
+        std::fs::create_dir_all(parent)?;
+    }
+
+    let mut out_file = BufWriter::with_capacity(
+        1024 * 1024,
+        File::create(&plan.temp_output).map_err(|err| {
+            RuviError::Filesystem(format!(
+                "failed creating output file {}: {err}",
+                plan.temp_output.display()
+            ))
+        })?,
+    );
+
+    // DUAL-INPUT REMUXING
+    if let Some(ref sec_path) = plan.secondary_input {
+        let sec_probed = probe_media_file(sec_path)?;
+        let mut sec_file = File::open(sec_path).map_err(|err| {
+            RuviError::Filesystem(format!(
+                "failed opening secondary file {}: {err}",
+                sec_path.display()
+            ))
+        })?;
+        let sec_audio = sec_probed
+            .info
+            .streams
+            .iter()
+            .find(|s| s.kind == StreamKind::Audio)
+            .or_else(|| sec_probed.info.streams.first());
+        let sec_audio_info = sec_audio.cloned().unwrap_or_else(|| StreamInfo {
+            index: 1,
+            kind: StreamKind::Audio,
+            codec_name: "aac".to_string(),
+            sample_rate: Some(sr),
+            channels: Some(ch),
+            ..Default::default()
+        });
+        let effective_video = src_video.cloned().unwrap_or_else(|| StreamInfo {
+            index: 0,
+            kind: StreamKind::Video,
+            codec_name: "h264".to_string(),
+            width: Some(out_w),
+            height: Some(out_h),
+            fps: Some(30.0),
+            ..Default::default()
+        });
+
+        let v_len = (probed
+            .payload_slice
+            .1
+            .saturating_sub(probed.payload_slice.0)) as u64;
+        let a_len = (sec_probed
+            .payload_slice
+            .1
+            .saturating_sub(sec_probed.payload_slice.0)) as u64;
+
+        match plan.container {
+            ContainerFormat::Mp4 | ContainerFormat::Mov | ContainerFormat::M4a => {
+                multiplex_mp4_dual_input(
+                    &mut src_file,
+                    &mut sec_file,
+                    &mut out_file,
+                    &effective_video,
+                    &sec_audio_info,
+                    probed.payload_slice.0 as u64,
+                    v_len,
+                    sec_probed.payload_slice.0 as u64,
+                    a_len,
+                    effective_duration,
+                )?;
+            }
+            ContainerFormat::Mkv | ContainerFormat::Webm => {
+                multiplex_ebml_dual_input(
+                    &mut src_file,
+                    &mut sec_file,
+                    &mut out_file,
+                    &effective_video,
+                    &sec_audio_info,
+                    probed.payload_slice.0 as u64,
+                    v_len,
+                    sec_probed.payload_slice.0 as u64,
+                    a_len,
+                    effective_duration,
+                )?;
+            }
+            _ => {
+                return Err(RuviError::Unsupported(format!(
+                    "dual-input remuxing not supported for container {:?}",
+                    plan.container
+                )));
+            }
+        }
+        out_file.flush()?;
+        emit_tick(progress, effective_duration, 0.75);
+        progress.on_progress(ProgressUpdate {
+            out_time_us: Some((effective_duration * 1_000_000.0) as u64),
+            fps: Some(30.0),
+            speed: Some("native".to_string()),
+            finished: true,
+        });
+
+        return Ok(ExecutionReport {
+            exit_code: 0,
+            stderr_tail: Vec::new(),
+            selected_video_encoder: plan.video_encoder.clone(),
+            selected_audio_encoder: plan.audio_encoder.clone(),
+            hwaccel_requested: plan.hwaccel_requested.as_str().to_string(),
+            hwaccel_used: None,
+            hwaccel_fallback_reason: plan.hwaccel_fallback_reason.clone(),
+            duration_ms: start.elapsed().as_millis() as u64,
+        });
+    }
+
+    // GENUINE AUDIO DEMUXING: AAC ADTS
+    if plan.operation == OperationKind::ExtractAudio && plan.container == ContainerFormat::Aac {
+        let audio_table_opt = probed
+            .track_tables
+            .iter()
+            .find(|t| t.handler_type == *b"soun");
+        if let Some(audio_table) = audio_table_opt {
+            let frames =
+                extract_aac_adts_stream(&mut src_file, &mut out_file, audio_table, sr, ch)?;
+            if frames > 0 {
+                out_file.flush()?;
+                emit_tick(progress, effective_duration, 0.75);
+                progress.on_progress(ProgressUpdate {
+                    out_time_us: Some((effective_duration * 1_000_000.0) as u64),
+                    fps: Some(30.0),
+                    speed: Some("native".to_string()),
+                    finished: true,
+                });
+                return Ok(ExecutionReport {
+                    exit_code: 0,
+                    stderr_tail: Vec::new(),
+                    selected_video_encoder: None,
+                    selected_audio_encoder: plan.audio_encoder.clone(),
+                    hwaccel_requested: plan.hwaccel_requested.as_str().to_string(),
+                    hwaccel_used: None,
+                    hwaccel_fallback_reason: None,
+                    duration_ms: start.elapsed().as_millis() as u64,
+                });
+            }
+        }
+    }
+
+    // SINGLE INPUT MP4 FASTSTART REMUX
+    if plan.operation == OperationKind::Remux
+        && matches!(
+            plan.container,
+            ContainerFormat::Mp4 | ContainerFormat::Mov | ContainerFormat::M4a
+        )
+        && probed.ftyp_len > 0
+    {
+        rewrite_mp4_faststart(&mut src_file, &mut out_file, src_file_len)?;
+        out_file.flush()?;
+        emit_tick(progress, effective_duration, 0.75);
+        progress.on_progress(ProgressUpdate {
+            out_time_us: Some((effective_duration * 1_000_000.0) as u64),
+            fps: Some(30.0),
+            speed: Some("native".to_string()),
+            finished: true,
+        });
+        return Ok(ExecutionReport {
+            exit_code: 0,
+            stderr_tail: Vec::new(),
+            selected_video_encoder: plan.video_encoder.clone(),
+            selected_audio_encoder: plan.audio_encoder.clone(),
+            hwaccel_requested: plan.hwaccel_requested.as_str().to_string(),
+            hwaccel_used: None,
+            hwaccel_fallback_reason: None,
+            duration_ms: start.elapsed().as_millis() as u64,
+        });
+    }
+
+    // ALL OTHER SINGLE-INPUT PATHS
+    let (payload_offset, payload_len) = if plan.operation == OperationKind::Trim {
+        let total_bytes = (probed
+            .payload_slice
+            .1
+            .saturating_sub(probed.payload_slice.0)) as u64;
+        let start_s = plan
+            .start_time
+            .as_deref()
+            .and_then(parse_timestamp_seconds)
+            .unwrap_or(0.0);
+        let start_frac = (start_s / src_dur).clamp(0.0, 0.95);
+        let end_frac = ((start_s + effective_duration) / src_dur).clamp(start_frac + 0.05, 1.0);
+        let s_offset = (total_bytes as f64 * start_frac) as u64;
+        let e_offset = ((total_bytes as f64 * end_frac) as u64)
+            .max(s_offset + 1)
+            .min(total_bytes);
+        (
+            probed.payload_slice.0 as u64 + s_offset,
+            e_offset - s_offset,
+        )
+    } else {
+        (
+            probed.payload_slice.0 as u64,
+            (probed
+                .payload_slice
+                .1
+                .saturating_sub(probed.payload_slice.0)) as u64,
+        )
+    };
+
+    let small_payload_limit = 2 * 1024 * 1024;
+    let mut payload_buf = Vec::new();
+    let is_small_payload = payload_len <= small_payload_limit;
+    if is_small_payload {
+        payload_buf.resize(payload_len as usize, 0);
+        src_file.seek(SeekFrom::Start(payload_offset))?;
+        src_file.read_exact(&mut payload_buf)?;
     }
 
     let vcodec = if plan.container.is_audio_only() || plan.container.is_image() {
@@ -104,7 +335,21 @@ pub async fn execute_native_plan(
             .or_else(|| src_audio.and_then(|a| AudioCodec::from_name(&a.codec_name).ok()))
     };
 
-    let output_bytes: Vec<u8> = match plan.container {
+    // Preserve HDR / 360-VR metadata as complete boxes from the source video track.
+    let video_table = probed
+        .track_tables
+        .iter()
+        .find(|t| &t.handler_type == b"vide");
+    let aux = src_video.map(|v| TrackAuxBoxes {
+        colr: video_table.and_then(|t| t.colr.clone()),
+        mdcv: video_table.and_then(|t| t.mdcv.clone()),
+        clli: video_table.and_then(|t| t.clli.clone()),
+        sv3d: video_table
+            .and_then(|t| t.sv3d.clone())
+            .or_else(|| v.spatial_360.clone()),
+    });
+
+    match plan.container {
         ContainerFormat::Mp4 | ContainerFormat::Mov | ContainerFormat::M4a => {
             let video_spec = if plan.container == ContainerFormat::M4a {
                 None
@@ -112,49 +357,79 @@ pub async fn execute_native_plan(
                 vcodec.map(|vc| (resolve_copy_video(vc, src_video), out_w, out_h))
             };
             let audio_spec = acodec.map(|ac| (resolve_copy_audio(ac, src_audio), sr, ch));
-            build_mp4_bytes(&Mp4BuildSpec {
+            let bytes = build_mp4_bytes(&Mp4BuildSpec {
                 container: plan.container,
                 duration_seconds: effective_duration,
                 video: video_spec,
                 audio: audio_spec,
-                mdat_payload: effective_payload,
-            })
+                mdat_payload: if is_small_payload { &payload_buf } else { &[] },
+                video_aux: aux,
+            });
+            out_file.write_all(&bytes)?;
+            if !is_small_payload {
+                src_file.seek(SeekFrom::Start(payload_offset))?;
+                copy_chunked(&mut src_file, &mut out_file, payload_len, 64 * 1024)?;
+            }
         }
         ContainerFormat::Mkv | ContainerFormat::Webm => {
             let video_spec = vcodec.map(|vc| (resolve_copy_video(vc, src_video), out_w, out_h));
             let audio_spec = acodec.map(|ac| (resolve_copy_audio(ac, src_audio), sr, ch));
-            build_ebml_bytes(&EbmlBuildSpec {
+            let bytes = build_ebml_bytes(&EbmlBuildSpec {
                 container: plan.container,
                 duration_seconds: effective_duration,
                 video: video_spec,
                 audio: audio_spec,
-                payload: effective_payload,
-            })
+                payload: if is_small_payload { &payload_buf } else { &[] },
+                video_colour: src_video.and_then(build_ebml_colour_element),
+                video_projection: src_video.and_then(build_ebml_projection_element),
+            });
+            out_file.write_all(&bytes)?;
+            if !is_small_payload {
+                src_file.seek(SeekFrom::Start(payload_offset))?;
+                copy_chunked(&mut src_file, &mut out_file, payload_len, 64 * 1024)?;
+            }
         }
-        ContainerFormat::Mp3 => build_mp3_bytes(effective_payload, sr, ch),
-        ContainerFormat::Flac => build_flac_bytes(effective_payload, sr, ch, effective_duration),
-        ContainerFormat::Wav => build_wav_bytes(effective_payload, sr, ch),
-        ContainerFormat::Aac => build_adts_bytes(effective_payload, sr, ch),
-        ContainerFormat::Ogg => build_ogg_opus_bytes(effective_payload, sr, ch, effective_duration),
-        ContainerFormat::Ts => build_mpegts_bytes(effective_payload),
-        ContainerFormat::Jpg => build_minimal_jpeg(out_w, out_h),
-        ContainerFormat::Png => build_minimal_png(out_w, out_h),
-        ContainerFormat::Webp => build_minimal_webp(out_w, out_h),
-    };
+        ContainerFormat::Mp3 => {
+            let bytes = build_mp3_bytes(&payload_buf, sr, ch);
+            out_file.write_all(&bytes)?;
+        }
+        ContainerFormat::Flac => {
+            let bytes = build_flac_bytes(&payload_buf, sr, ch, effective_duration);
+            out_file.write_all(&bytes)?;
+        }
+        ContainerFormat::Wav => {
+            let bytes = build_wav_bytes(&payload_buf, sr, ch);
+            out_file.write_all(&bytes)?;
+        }
+        ContainerFormat::Aac => {
+            let bytes = build_adts_bytes(&payload_buf, sr, ch);
+            out_file.write_all(&bytes)?;
+        }
+        ContainerFormat::Ogg => {
+            let bytes = build_ogg_opus_bytes(&payload_buf, sr, ch, effective_duration);
+            out_file.write_all(&bytes)?;
+        }
+        ContainerFormat::Ts => {
+            let bytes = build_mpegts_bytes(&payload_buf);
+            out_file.write_all(&bytes)?;
+        }
+        ContainerFormat::Jpg => {
+            out_file.write_all(&build_minimal_jpeg(out_w, out_h))?;
+        }
+        ContainerFormat::Png => {
+            out_file.write_all(&build_minimal_png(out_w, out_h))?;
+        }
+        ContainerFormat::Webp => {
+            out_file.write_all(&build_minimal_webp(out_w, out_h))?;
+        }
+    }
+
+    out_file.flush()?;
 
     emit_tick(progress, effective_duration, 0.75);
     if cancel.is_cancelled() {
         return Err(RuviError::Cancelled("operation cancelled".to_string()));
     }
-
-    if let Some(parent) = plan
-        .temp_output
-        .parent()
-        .filter(|p| !p.as_os_str().is_empty())
-    {
-        std::fs::create_dir_all(parent)?;
-    }
-    std::fs::write(&plan.temp_output, &output_bytes)?;
 
     progress.on_progress(ProgressUpdate {
         out_time_us: Some((effective_duration * 1_000_000.0) as u64),
@@ -173,6 +448,31 @@ pub async fn execute_native_plan(
         hwaccel_fallback_reason: plan.hwaccel_fallback_reason.clone(),
         duration_ms: start.elapsed().as_millis() as u64,
     })
+}
+
+/// Reads only the `moov` box (bounded, never the media payload) and validates its
+/// structure before any output is written. Non-MP4 inputs (`moov_len == 0`) are skipped.
+fn verify_source_integrity(
+    file: &mut File,
+    file_len: u64,
+    moov_offset: usize,
+    moov_len: usize,
+) -> RuviResult<()> {
+    const MAX_MOOV_BYTES: usize = 256 * 1024 * 1024;
+    if moov_len == 0 {
+        return Ok(());
+    }
+    if moov_len > MAX_MOOV_BYTES || (moov_offset as u64).saturating_add(moov_len as u64) > file_len
+    {
+        return Err(RuviError::Integrity(
+            "moov box exceeds file bounds or size limit".to_string(),
+        ));
+    }
+    let mut moov = vec![0u8; moov_len];
+    file.seek(SeekFrom::Start(moov_offset as u64))?;
+    file.read_exact(&mut moov)?;
+    file.seek(SeekFrom::Start(0))?;
+    validate_moov_integrity(&moov, file_len)
 }
 
 fn emit_tick(progress: &dyn ProgressSink, duration_s: f64, fraction: f64) {
@@ -204,18 +504,6 @@ fn resolve_copy_audio(
     }
     src.and_then(|s| AudioCodec::from_name(&s.codec_name).ok())
         .unwrap_or(AudioCodec::Aac)
-}
-
-fn slice_payload_for_trim(payload: &[u8], total_dur: f64, start_s: f64, dur_s: f64) -> &[u8] {
-    if payload.is_empty() || total_dur <= 0.0 {
-        return payload;
-    }
-    let len = payload.len();
-    let start_frac = (start_s / total_dur).clamp(0.0, 0.95);
-    let end_frac = ((start_s + dur_s) / total_dur).clamp(start_frac + 0.05, 1.0);
-    let s_idx = ((len as f64) * start_frac) as usize;
-    let e_idx = (((len as f64) * end_frac) as usize).max(s_idx + 1).min(len);
-    &payload[s_idx..e_idx]
 }
 
 fn build_mp3_bytes(payload: &[u8], sr: u32, ch: u16) -> Vec<u8> {

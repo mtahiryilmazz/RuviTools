@@ -32,6 +32,7 @@ pub async fn execute_thumbnail(
     let job = ConversionJob {
         kind: OperationKind::Thumbnail,
         input: req.input,
+        secondary_input: None,
         output: req.output,
         container,
         overwrite,

@@ -24,18 +24,26 @@ const MAX_STDERR_LINES: usize = 64;
 pub struct FfmpegBackend {
     locations: FfmpegLocations,
     timeout: Duration,
+    cached_caps: tokio::sync::OnceCell<BackendCapabilities>,
 }
 
 impl FfmpegBackend {
     pub fn new(locations: FfmpegLocations, timeout: Duration) -> Self {
-        Self { locations, timeout }
+        Self {
+            locations,
+            timeout,
+            cached_caps: tokio::sync::OnceCell::new(),
+        }
     }
 }
 
 #[async_trait]
 impl MediaBackend for FfmpegBackend {
     async fn capabilities(&self) -> RuviResult<BackendCapabilities> {
-        probe_capabilities(&self.locations.ffmpeg, &self.locations.ffprobe).await
+        self.cached_caps
+            .get_or_try_init(|| probe_capabilities(&self.locations.ffmpeg, &self.locations.ffprobe))
+            .await
+            .cloned()
     }
 
     async fn probe(&self, input: &Path) -> RuviResult<MediaInfo> {

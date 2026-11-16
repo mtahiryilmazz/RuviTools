@@ -20,6 +20,7 @@ pub enum OperationKind {
 pub struct ConversionJob {
     pub kind: OperationKind,
     pub input: PathBuf,
+    pub secondary_input: Option<PathBuf>,
     pub output: PathBuf,
     pub container: ContainerFormat,
     pub overwrite: OverwritePolicy,
