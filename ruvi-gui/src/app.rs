@@ -516,6 +516,7 @@ pub struct RuviStudioApp {
     pub getube_native_host_found: bool,
     pub getube_extension_found: bool,
     theme_initialized: bool,
+    chrome_applied_theme: Option<StudioTheme>,
 }
 
 impl Default for RuviStudioApp {
@@ -609,6 +610,7 @@ impl RuviStudioApp {
             playlist_entries: Vec::new(),
             telemetry: StudioTelemetry::default(),
             theme_initialized: false,
+            chrome_applied_theme: None,
         };
         app.check_getube_status();
         app
@@ -1638,10 +1640,20 @@ impl RuviStudioApp {
         let desired_size = Vec2::new(ui.available_width(), 44.0);
         let (rect, response) = ui.allocate_exact_size(desired_size, egui::Sense::click());
 
-        let bg = if is_selected {
-            theme.nav_item_active_fill()
-        } else if response.hovered() {
-            theme.nav_item_hover_fill()
+        // Fluent-style eased transitions for hover / selection (120ms / 180ms).
+        let ctx = ui.ctx().clone();
+        let hover_t = ctx.animate_bool_with_time(
+            response.id.with("nav_hover"),
+            response.hovered() && !is_selected,
+            0.12,
+        );
+        let select_t =
+            ctx.animate_bool_with_time(response.id.with("nav_select"), is_selected, 0.18);
+
+        let bg = if select_t > 0.0 {
+            theme.nav_item_active_fill().gamma_multiply(select_t)
+        } else if hover_t > 0.0 {
+            theme.nav_item_hover_fill().gamma_multiply(hover_t)
         } else {
             Color32::TRANSPARENT
         };
@@ -1650,10 +1662,11 @@ impl RuviStudioApp {
             ui.painter().rect_filled(rect, 6.0, bg);
         }
 
-        if is_selected {
+        if select_t > 0.0 {
+            let bar_h = 22.0 * select_t;
             let accent_rect = Rect::from_min_size(
-                egui::Pos2::new(rect.left() + 2.0, rect.center().y - 11.0),
-                Vec2::new(3.0, 22.0),
+                egui::Pos2::new(rect.left() + 2.0, rect.center().y - bar_h / 2.0),
+                Vec2::new(3.0, bar_h),
             );
             ui.painter()
                 .rect_filled(accent_rect, 1.5, theme.accent_secondary());
@@ -2185,7 +2198,12 @@ impl RuviStudioApp {
 }
 
 impl eframe::App for RuviStudioApp {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn update(&mut self, ctx: &egui::Context, frame: &mut eframe::Frame) {
+        // Re-apply native Win11 chrome (dark title bar, rounded corners, Mica) on theme change.
+        if self.chrome_applied_theme != Some(self.current_theme) {
+            crate::win11::apply_window_chrome(frame, self.current_theme == StudioTheme::Dark);
+            self.chrome_applied_theme = Some(self.current_theme);
+        }
         self.render_ui(ctx);
     }
 }

@@ -3,6 +3,10 @@ use std::sync::Arc;
 use eframe::egui;
 use ruvi_gui::{RuviStudioApp, configure_fonts};
 
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn main() -> eframe::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--version" || a == "-V") {

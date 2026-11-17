@@ -48,10 +48,13 @@ multiple-versions = "warn"
 wildcards = "deny"
 highlight = "all"
 
-# Flag OpenSSL native C dependency: no crate other than `openssl` may pull `openssl-sys`.
-# Once reqwest switches from default-tls (`native-tls`) to `rustls-tls`, remove `wrappers` to deny completely.
+# Hard-ban the native OpenSSL C stack: all HTTP clients use pure-Rust `rustls-tls`
+# (reqwest with `default-features = false`), so `openssl-sys`/`native-tls`/`schannel`
+# must never reappear in the graph.
 deny = [
-    { crate = "openssl-sys", wrappers = ["openssl"], reason = "Prefer pure-Rust rustls-tls; openssl-sys is only tolerated temporarily via reqwest default-tls -> native-tls -> openssl" },
+    { crate = "openssl-sys", reason = "All HTTP goes through reqwest + rustls-tls; native OpenSSL must not be reintroduced" },
+    { crate = "native-tls", reason = "Use rustls-tls for TLS; native-tls pulls platform TLS/OpenSSL" },
+    { crate = "schannel", reason = "Use rustls-tls for TLS; schannel is the Windows native-tls backend" },
 ]
 
 [sources]

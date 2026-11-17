@@ -1,4 +1,4 @@
-﻿# RuviTools — Birleşik Doğrulama Betiği (Supply-Chain, JSON, PowerShell AST, Rust Gates)
+# RuviTools — Birleşik Doğrulama Betiği (Supply-Chain, JSON, PowerShell AST, Rust Gates)
 # UTF-8 BOM
 
 [CmdletBinding()]
@@ -68,11 +68,17 @@ foreach ($crate in $Crates) {
   }
 
   $raw = Get-Content -LiteralPath $lockPath -Raw -Encoding UTF8
+  # A lockfile padded with NUL bytes (or truncated) silently breaks every cargo command.
+  $nulCount = ([regex]::Matches($raw, "`0")).Count
+  if ($nulCount -gt 0) {
+    Add-CheckResult -Check "Cargo.lock ($crate)" -Passed $false -Detail "$nulCount NUL byte(s) found; regenerate the lockfile (corrupted on disk)"
+    continue
+  }
   $blocks = $raw -split '\r?\n\[\[package\]\]\r?\n'
   $pkgCount = 0
   $badSources = New-Object System.Collections.Generic.List[string]
   $byName = @{}
-  $hasOpenSslSys = $false
+  $nativeTls = New-Object System.Collections.Generic.List[string]
   $hasRustls = $false
 
   foreach ($block in $blocks) {
@@ -83,7 +89,8 @@ foreach ($crate in $Crates) {
       if (-not $byName.ContainsKey($name)) { $byName[$name] = New-Object System.Collections.Generic.List[string] }
       $byName[$name].Add($ver)
 
-      if ($name -eq 'openssl-sys') { $hasOpenSslSys = $true }
+      # Pure-Rust TLS policy (deny.toml): no native OpenSSL / platform TLS backends.
+      if ($name -in @('openssl', 'openssl-sys', 'native-tls', 'schannel')) { $nativeTls.Add("${name}@${ver}") }
       if ($name -eq 'rustls') { $hasRustls = $true }
 
       if ($block -match 'source = "([^"]+)"') {
@@ -95,11 +102,18 @@ foreach ($crate in $Crates) {
     }
   }
 
+  if ($pkgCount -eq 0) {
+    Add-CheckResult -Check "Cargo.lock ($crate)" -Passed $false -Detail "No [[package]] entries parsed; lockfile is malformed"
+    continue
+  }
+
   $dupCount = @($byName.GetEnumerator() | Where-Object { $_.Value.Count -gt 1 }).Count
-  $tlsNote = if ($hasOpenSslSys -and $hasRustls) { 'rustls+openssl-sys' } elseif ($hasRustls) { 'rustls' } elseif ($hasOpenSslSys) { 'openssl-sys' } else { 'none' }
+  $tlsNote = if ($hasRustls) { 'rustls' } elseif ($nativeTls.Count -gt 0) { 'native' } else { 'none' }
 
   if ($badSources.Count -gt 0) {
     Add-CheckResult -Check "Cargo.lock ($crate)" -Passed $false -Detail ("Disallowed sources: " + ($badSources -join '; '))
+  } elseif ($nativeTls.Count -gt 0) {
+    Add-CheckResult -Check "Cargo.lock ($crate)" -Passed $false -Detail ("Native TLS/OpenSSL crates present (use reqwest rustls-tls): " + ($nativeTls -join ', '))
   } elseif ($FailOnMultipleVersions -and $dupCount -gt 0) {
     Add-CheckResult -Check "Cargo.lock ($crate)" -Passed $false -Detail "$pkgCount pkgs, $dupCount duplicate crate names (FailOnMultipleVersions enabled)"
   } else {

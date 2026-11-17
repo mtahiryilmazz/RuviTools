@@ -36,3 +36,6 @@ desktop.ini
 .env
 .env.*
 *.pem
+
+# Harici / bağımsız kopya (kendi .git deposu ve node_modules içerir)
+/antigravity-add-model/
