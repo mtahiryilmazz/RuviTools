@@ -68,3 +68,18 @@ Detaylı ölçümler [BENCHMARK.md](file:///d:/mtahiryilmazz/Github/RuviTools/BE
 .\ruvic\target\release\ruvic.exe audio ".\yt.mp4" -o ".\yt.aac" --overwrite --json
 .\ruvic\target\release\ruvic.exe audio ".\yt.mp4" -o ".\yt.m4a" --overwrite --json
 ```
+
+---
+
+## 4. Son Oturum Degisiklikleri (2026-11-17)
+
+- **Saf Rust TLS (rustls) gecisi tamamlandi:** `ruvid/Cargo.toml` icinde `reqwest` artik `default-features = false` + `rustls-tls` kullaniyor (varsayilan `charset`, `http2`, `system-proxy` ozellikleri acikca korundu). Boylece `default-tls -> native-tls -> openssl-sys` native C zinciri tamamen kaldirildi.
+- **`deny.toml` sikiestirildi:** gecici `openssl-sys` wrapper istisnasi silindi; `openssl-sys`, `native-tls` ve `schannel` artik kosulsuz `deny`.
+- **`scripts/verify-all.ps1`:** TLS denetimi artik bilgi notu degil, sert kapi (native TLS/OpenSSL crates -> FAIL). Ayrica NUL ile dolgulanmis / bozuk `Cargo.lock` dosyalarini tespit ediyor.
+- **Onemli onarim:** `ruvi-native-host/Cargo.lock` depoya **733 adet sondaki NUL bayti** ile commit edilmisti; bu crate'te her `cargo` komutu TOML parse hatasi veriyordu. Dosya kirpildi ve yeniden uretildi.
+- **`ruvi-gui` (Win11 cilasi):** `src/win11.rs` eklendi - DWM ile koyu baslik cubugu (`DWMWA_USE_IMMERSIVE_DARK_MODE`), yuvarlatilmis kose (`DWMWCP_ROUND`) ve Mica arka plan (`DWMSBT_MAINWINDOW`); tema degisiminde yeniden uygulanir. Sol menu hover/secim gecisleri Fluent tarzi yumusak animasyonlu (120 ms / 180 ms) hale getirildi. `--features mimalloc` opt-in global allocator `main.rs`'e eklendi.
+- **Release profil optimizasyonu:** 4 crate'e `[profile.release] strip = true, lto = "fat", codegen-units = 1` eklendi. rustls/ring/webpki-roots ek yuku boylece geri kazanildi: `ruvid.exe` (LTO oncesi 8.62 MB) -> **7.01 MB**, yani rustls gecisi oncesine gore yalnizca **+0.14 MB**; `ruvic.exe` ise **0.24 MB daha kucuk** (3.49 MB).
+- **Olculen guncel ikili boyutlari:** `ruvid.exe` 7,350,784 B / 7.01 MB - `ruvic.exe` 3,662,848 B / 3.49 MB - `NativeHost.exe` 5,125,632 B / 4.89 MB - `ruvi-studio.exe` 9,948,160 B / 9.49 MB. CLI toplami **~10.50 MB** (`BENCHMARK.md`, `BENCHMARK_REPORT.md`, `docs/ROADMAP_COMPARISON.md` ve SVG panosu bu degerlere gore guncellendi).
+- **Dogrulama:** `scripts/verify-all.ps1` (4 crate x fmt + clippy `-D warnings` + test, lockfile & TLS denetimi) tamamen **PASS**. Canli HTTPS testi: `ruvid info "https://www.youtube.com/watch?v=jNQXAC9IVRw"` rustls uzerinden basarili.
+- **Dikkat:** `BENCHMARK.md`, `HANDOFF.md`, `BENCHMARK_REPORT.md` ve `docs/ROADMAP_COMPARISON.md` dosyalari **UTF-8 degil** (Turkce metin codepage-1254). Bu dosyalari duzenlerken byte-koruyucu bir yol kullanin, aksi halde normal metin edit'leri sessizce eslesmez veya dosyayi bozar.
+- **Kapsam disi birakilan:** depoda `antigravity-add-model/` adinda, kendi `.git` deposu ve `node_modules`'u olan ilgisiz bir kopya var; `.gitignore`'a eklendi.
