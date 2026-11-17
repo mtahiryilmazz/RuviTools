@@ -95,3 +95,21 @@ fn doctor_reports_native_engine_and_optional_ffmpeg_override() {
         .stdout(predicate::str::contains(r#""engine": "ffmpeg-subprocess""#))
         .stdout(predicate::str::contains("7.1-ruvic-fake"));
 }
+
+#[test]
+fn completions_subcommand_generates_shell_scripts() {
+    let tmp = tempfile::tempdir().unwrap();
+
+    common::ruvic_cmd(tmp.path())
+        .args(["completions", "powershell"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("Register-ArgumentCompleter"))
+        .stdout(predicate::str::contains("ruvic"));
+
+    common::ruvic_cmd(tmp.path())
+        .args(["completions", "bash"])
+        .assert()
+        .success()
+        .stdout(predicate::str::contains("ruvic"));
+}

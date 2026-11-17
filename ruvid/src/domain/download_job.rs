@@ -89,3 +89,21 @@ pub struct PlaylistReport {
     pub items: Vec<DownloadOutcome>,
     pub errors: Vec<PlaylistItemError>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct SimulateReport {
+    pub ok: bool,
+    pub simulated: bool,
+    pub url: String,
+    pub title: String,
+    pub stream_id: String,
+    pub dual_stream: bool,
+    pub container: String,
+    pub output_path: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub expected_bytes: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub width: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub height: Option<u32>,
+}

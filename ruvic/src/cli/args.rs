@@ -77,6 +77,13 @@ pub enum Commands {
 
     /// Check ffmpeg/ffprobe availability, versions, and capabilities
     Doctor,
+
+    /// Generate shell completion scripts to stdout
+    Completions {
+        /// Target shell (bash, zsh, fish, powershell, elvish)
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 #[derive(Debug, Args)]

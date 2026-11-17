@@ -1,13 +1,15 @@
 use std::path::Path;
 use std::sync::Arc;
 
+use clap::CommandFactory;
 use serde::Serialize;
 use tokio::sync::Mutex;
 use tokio::task::JoinSet;
 
 use crate::cli::args::{Cli, Commands, ConfigSubcommand, GetArgs, InfoArgs, PlaylistArgs};
 use crate::cli::render::{
-    emit_json, render_download_human, render_playlist_human, render_source_info_human,
+    emit_json, render_download_human, render_playlist_human, render_simulate_human,
+    render_source_info_human,
 };
 use crate::config::{
     AppPaths, RuvidConfig, default_config_toml, init_config, load_config, resolve_paths,
@@ -16,11 +18,13 @@ use crate::domain::download_job::{DownloadJob, PlaylistItemError, PlaylistReport
 use crate::domain::media_manifest::{
     redact_media_source, redact_sensitive_url, redact_urls_in_text,
 };
-use crate::downloader::execute_download;
 use crate::downloader::scheduler::DownloadScheduler;
+use crate::downloader::{execute_download, simulate_download};
 use crate::error::{RuviError, RuviResult};
 use crate::resolver::ResolveContext;
-use crate::resolver::registry::{ResolverRegistry, fetch_playlist_entries, parse_item_selection};
+use crate::resolver::registry::{
+    PlaylistEntry, ResolverRegistry, fetch_playlist_entries, parse_item_selection,
+};
 use crate::storage::sanitize_filename;
 
 #[derive(Debug, Serialize)]
@@ -36,6 +40,12 @@ struct DoctorReport {
 }
 
 pub async fn dispatch(cli: Cli) -> RuviResult<()> {
+    if let Commands::Completions { shell } = cli.command {
+        let mut cmd = Cli::command();
+        clap_complete::generate(shell, &mut cmd, "ruvid", &mut std::io::stdout());
+        return Ok(());
+    }
+
     let (config, paths) = match &cli.command {
         Commands::Config(cfg_cmd) if matches!(cfg_cmd.action, ConfigSubcommand::Path) => {
             let p = resolve_paths(cli.config.as_deref())?;
@@ -84,6 +94,7 @@ pub async fn dispatch(cli: Cli) -> RuviResult<()> {
             )
             .await
         }
+        Commands::Completions { .. } => unreachable!("handled prior to config loading"),
     }
 }
 
@@ -132,6 +143,8 @@ async fn handle_get(
         config.download.resume
     };
 
+    let simulate = args.simulate;
+    let to_stdout = args.stdout;
     let job = DownloadJob {
         url: args.url,
         output_template: args.output,
@@ -145,7 +158,7 @@ async fn handle_get(
         proxy: args.proxy,
         headers,
         write_manifest: args.write_manifest,
-        to_stdout: args.stdout,
+        to_stdout,
         subtitles: args.subtitles || args.auto_subs,
         subtitles_lang: args.subtitles_lang,
         sub_format: args.sub_format,
@@ -159,8 +172,18 @@ async fn handle_get(
         allow_private_net: allow_private,
     };
 
+    if simulate {
+        let report = simulate_download(config, &job).await?;
+        if json_mode {
+            emit_json(&report);
+        } else {
+            render_simulate_human(&report, quiet);
+        }
+        return Ok(());
+    }
+
     let outcome = execute_download(config, job, show_progress).await?;
-    if !args.stdout {
+    if !to_stdout {
         if json_mode {
             emit_json(&outcome);
         } else {
@@ -188,7 +211,22 @@ async fn handle_playlist(
         config.download.retry_count,
     )?;
 
-    let entries = fetch_playlist_entries(&ctx, &args.url).await?;
+    let mut entries = Vec::new();
+    if let Some(ref url) = args.url {
+        entries.extend(fetch_playlist_entries(&ctx, url).await?);
+    }
+    if let Some(ref batch_path) = args.batch_file {
+        entries.extend(read_batch_file_entries(batch_path)?);
+    }
+    for (idx, entry) in entries.iter_mut().enumerate() {
+        entry.index = idx + 1;
+    }
+    if entries.is_empty() {
+        return Err(RuviError::InvalidArgument(
+            "playlist or batch file contained no URLs".to_string(),
+        ));
+    }
+
     let selected_indices = match args.items.as_deref() {
         Some(spec) => parse_item_selection(spec, entries.len())?,
         None => (1..=entries.len()).collect(),
@@ -219,6 +257,13 @@ async fn handle_playlist(
         let jobs_c = args.jobs.unwrap_or(config.download.jobs);
         let overwrite_c = args.overwrite || config.download.overwrite;
         let skip_errors = args.skip_errors;
+        let write_manifest_c = args.write_manifest;
+        let subtitles_c = args.subtitles || args.auto_subs;
+        let subtitles_lang_c = args.subtitles_lang.clone();
+        let sub_format_c = args.sub_format.clone();
+        let auto_subs_c = args.auto_subs;
+        let audio_lang_c = args.audio_lang.clone();
+        let split_chapters_c = args.split_chapters;
         let results_c = results.clone();
         let errors_c = errors.clone();
 
@@ -230,6 +275,11 @@ async fn handle_playlist(
                 .map(sanitize_filename)
                 .unwrap_or_else(|| format!("item_{:03}", entry.index));
             let template = base_dir_c.join(format!("{:03}_{title_part}.%(ext)s", entry.index));
+            let manifest_path = if write_manifest_c {
+                Some(base_dir_c.join(format!("{:03}_{title_part}.manifest.json", entry.index)))
+            } else {
+                None
+            };
             let job = DownloadJob {
                 url: entry.url.clone(),
                 output_template: Some(template),
@@ -242,14 +292,14 @@ async fn handle_playlist(
                 timeout_seconds: cfg_c.download.timeout_seconds,
                 proxy: None,
                 headers: Vec::new(),
-                write_manifest: None,
+                write_manifest: manifest_path,
                 to_stdout: false,
-                subtitles: false,
-                subtitles_lang: None,
-                sub_format: "vtt".to_string(),
-                auto_subs: false,
-                audio_lang: None,
-                split_chapters: false,
+                subtitles: subtitles_c,
+                subtitles_lang: subtitles_lang_c,
+                sub_format: sub_format_c,
+                auto_subs: auto_subs_c,
+                audio_lang: audio_lang_c,
+                split_chapters: split_chapters_c,
                 clip: None,
                 start_time: None,
                 end_time: None,
@@ -299,6 +349,36 @@ async fn handle_playlist(
         render_playlist_human(&report, quiet);
     }
     Ok(())
+}
+
+fn read_batch_file_entries(path: &Path) -> RuviResult<Vec<PlaylistEntry>> {
+    use std::io::Read;
+
+    let raw = if path == Path::new("-") {
+        let mut buf = String::new();
+        std::io::stdin().read_to_string(&mut buf).map_err(|err| {
+            RuviError::Filesystem(format!("failed reading batch URLs from stdin: {err}"))
+        })?;
+        buf
+    } else {
+        std::fs::read_to_string(path).map_err(|err| {
+            RuviError::Filesystem(format!("failed reading batch file {}: {err}", path.display()))
+        })?
+    };
+
+    let mut entries = Vec::new();
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with('#') {
+            continue;
+        }
+        entries.push(PlaylistEntry {
+            index: entries.len() + 1,
+            title: None,
+            url: trimmed.to_string(),
+        });
+    }
+    Ok(entries)
 }
 
 fn parse_headers(raw_headers: &[String]) -> RuviResult<Vec<(String, String)>> {

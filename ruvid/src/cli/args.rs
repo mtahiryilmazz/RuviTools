@@ -59,6 +59,13 @@ pub enum Commands {
 
     /// Check environment, config, cache, and writable output directory
     Doctor,
+
+    /// Generate shell completion scripts to stdout
+    Completions {
+        /// Target shell (bash, zsh, fish, powershell, elvish)
+        #[arg(value_enum)]
+        shell: clap_complete::Shell,
+    },
 }
 
 #[derive(Debug, Args)]
@@ -158,6 +165,10 @@ pub struct GetArgs {
     /// Clip duration in seconds
     #[arg(long, value_name = "SECONDS")]
     pub duration: Option<f64>,
+
+    /// Resolve source, select stream, and plan output filename without downloading or writing files
+    #[arg(long)]
+    pub simulate: bool,
 }
 
 #[derive(Debug, Args)]
@@ -182,8 +193,12 @@ pub struct InfoArgs {
 #[derive(Debug, Args)]
 pub struct PlaylistArgs {
     /// Playlist catalog URL (.m3u or JSON)
-    #[arg(value_name = "URL")]
-    pub url: String,
+    #[arg(value_name = "URL", required_unless_present = "batch_file")]
+    pub url: Option<String>,
+
+    /// Read newline-delimited URLs from a file (use '-' for stdin; ignores blank lines and '#' comments)
+    #[arg(short = 'a', long, value_name = "PATH")]
+    pub batch_file: Option<PathBuf>,
 
     /// Item selection expression (e.g. "1-5,8")
     #[arg(long, value_name = "SPEC")]
@@ -212,6 +227,34 @@ pub struct PlaylistArgs {
     /// Overwrite existing files
     #[arg(long)]
     pub overwrite: bool,
+
+    /// Write a RUVI JSON handoff manifest per item in the output directory
+    #[arg(long)]
+    pub write_manifest: bool,
+
+    /// Download available subtitle tracks
+    #[arg(long)]
+    pub subtitles: bool,
+
+    /// Preferred subtitle language code (e.g. en, tr)
+    #[arg(long, value_name = "LANG")]
+    pub subtitles_lang: Option<String>,
+
+    /// Subtitle output format (vtt, srt, sbv)
+    #[arg(long, value_name = "FORMAT", default_value = "vtt")]
+    pub sub_format: String,
+
+    /// Include auto-generated (ASR) subtitle tracks
+    #[arg(long)]
+    pub auto_subs: bool,
+
+    /// Preferred audio language code for multi-language dubbed tracks (e.g. en, tr)
+    #[arg(long, value_name = "LANG")]
+    pub audio_lang: Option<String>,
+
+    /// Split downloaded videos into separate files per chapter
+    #[arg(long)]
+    pub split_chapters: bool,
 }
 
 #[derive(Debug, Args)]

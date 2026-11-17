@@ -1,5 +1,6 @@
 use std::path::{Path, PathBuf};
 
+use clap::CommandFactory;
 use serde::Serialize;
 
 use crate::backend::ffmpeg::try_locate_ffmpeg;
@@ -42,6 +43,12 @@ struct DoctorReport {
 }
 
 pub async fn dispatch(cli: Cli) -> RuviResult<()> {
+    if let Commands::Completions { shell } = cli.command {
+        let mut cmd = Cli::command();
+        clap_complete::generate(shell, &mut cmd, "ruvic", &mut std::io::stdout());
+        return Ok(());
+    }
+
     let (config, paths) = match &cli.command {
         Commands::Config(cfg_cmd) if matches!(cfg_cmd.action, ConfigSubcommand::Path) => {
             let p = resolve_paths(cli.config.as_deref())?;
@@ -238,6 +245,7 @@ pub async fn dispatch(cli: Cli) -> RuviResult<()> {
             }
             Ok(())
         }
+        Commands::Completions { .. } => unreachable!("handled prior to config loading"),
     }
 }
 

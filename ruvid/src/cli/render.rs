@@ -2,7 +2,7 @@ use std::io::Write;
 
 use serde::Serialize;
 
-use crate::domain::download_job::{DownloadOutcome, PlaylistReport};
+use crate::domain::download_job::{DownloadOutcome, PlaylistReport, SimulateReport};
 use crate::domain::media_source::MediaSource;
 use crate::domain::stream::StreamPayload;
 
@@ -91,4 +91,27 @@ pub fn render_playlist_human(report: &PlaylistReport, quiet: bool) {
     for err in &report.errors {
         eprintln!("  Item #{} failed: {}", err.index, err.error);
     }
+}
+
+pub fn render_simulate_human(report: &SimulateReport, quiet: bool) {
+    if quiet {
+        return;
+    }
+    let size_part = report
+        .expected_bytes
+        .map(|b| format!("{b} bytes"))
+        .unwrap_or_else(|| "unknown size".to_string());
+    let dims_part = match (report.width, report.height) {
+        (Some(w), Some(h)) => format!(" {w}x{h}"),
+        _ => String::new(),
+    };
+    println!(
+        "[simulate] {} | stream={} ({}{} | {}) -> {}",
+        report.title,
+        report.stream_id,
+        report.container,
+        dims_part,
+        size_part,
+        report.output_path
+    );
 }

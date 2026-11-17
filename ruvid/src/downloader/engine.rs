@@ -4,7 +4,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::assembly::{write_dual_stream_handoff_manifest, write_handoff_manifest};
 use crate::config::RuvidConfig;
-use crate::domain::download_job::{DownloadJob, DownloadOutcome, DownloadPlan, SubtitleDownload};
+use crate::domain::download_job::{
+    DownloadJob, DownloadOutcome, DownloadPlan, SimulateReport, SubtitleDownload,
+};
 use crate::domain::media_manifest::redact_sensitive_url;
 use crate::domain::media_source::{Chapter, SubtitleTrack};
 use crate::domain::selection::{select_stream_pair_with_lang, select_stream_with_lang};
@@ -19,6 +21,129 @@ use crate::resolver::platform::youtube::{convert_subtitle_payload, parse_timesta
 use crate::resolver::registry::ResolverRegistry;
 use crate::storage::{ensure_writable_destination, resolve_output_path, sanitize_filename};
 use crate::telemetry::DownloadProgress;
+
+pub async fn simulate_download(
+    config: &RuvidConfig,
+    job: &DownloadJob,
+) -> RuviResult<SimulateReport> {
+    if job.write_manifest.as_deref() == Some(Path::new("-")) {
+        let msg = if job.to_stdout {
+            "--stdout cannot be combined with --write-manifest -"
+        } else {
+            "writing JSON handoff manifest to stdout ('-') is unsupported; specify a file path"
+        };
+        return Err(RuviError::InvalidArgument(msg.to_string()));
+    }
+
+    let rate_spec = job
+        .limit_rate
+        .as_deref()
+        .unwrap_or(&config.network.limit_rate);
+    let _ = parse_rate_limit(rate_spec)?;
+
+    let ctx = ResolveContext::build(
+        &config.network.user_agent,
+        config.network.connect_timeout_seconds,
+        job.timeout_seconds,
+        job.proxy.as_deref().or(config.network.proxy.as_deref()),
+        &job.headers,
+        job.allow_private_net || config.network.allow_private_network,
+        job.retry_count,
+    )?;
+
+    let source = ResolverRegistry::resolve(&ctx, &job.url).await?;
+
+    let dual_stream_pair = if !job.to_stdout
+        && (job.audio_lang.is_none() || job.format_spec != "best")
+    {
+        select_stream_pair_with_lang(&source.streams, &job.format_spec, job.audio_lang.as_deref())
+    } else {
+        None
+    };
+
+    if let Some((video_stream, audio_stream)) = dual_stream_pair {
+        let ext = if video_stream.container.is_empty() {
+            source.default_ext.as_str()
+        } else {
+            video_stream.container.as_str()
+        };
+        let output_path = resolve_output_path(
+            job.output_template.as_deref(),
+            &config.download.output_dir,
+            &source.title,
+            ext,
+            &video_stream.id,
+        )?;
+        let v_bytes = match &video_stream.payload {
+            StreamPayload::DirectHttp { total_bytes, .. } => *total_bytes,
+            _ => None,
+        };
+        let a_bytes = match &audio_stream.payload {
+            StreamPayload::DirectHttp { total_bytes, .. } => *total_bytes,
+            _ => None,
+        };
+        let expected_bytes = match (v_bytes, a_bytes) {
+            (Some(v), Some(a)) => Some(v + a),
+            (v, a) => v.or(a),
+        };
+        return Ok(SimulateReport {
+            ok: true,
+            simulated: true,
+            url: redact_sensitive_url(&job.url),
+            title: source.title,
+            stream_id: format!("{}+{}", video_stream.id, audio_stream.id),
+            dual_stream: true,
+            container: ext.to_string(),
+            output_path: output_path.to_string_lossy().into_owned(),
+            expected_bytes,
+            width: video_stream.width,
+            height: video_stream.height,
+        });
+    }
+
+    let selected =
+        select_stream_with_lang(&source.streams, &job.format_spec, job.audio_lang.as_deref())?;
+    let ext = if selected.container.is_empty() {
+        source.default_ext.as_str()
+    } else {
+        selected.container.as_str()
+    };
+    let output_path = if job.to_stdout {
+        PathBuf::from("-")
+    } else {
+        resolve_output_path(
+            job.output_template.as_deref(),
+            &config.download.output_dir,
+            &source.title,
+            ext,
+            &selected.id,
+        )?
+    };
+    if job.to_stdout && !matches!(selected.payload, StreamPayload::DirectHttp { .. }) {
+        return Err(RuviError::Unsupported(
+            "--stdout streaming is only supported for direct HTTP single-stream downloads"
+                .to_string(),
+        ));
+    }
+    let expected_bytes = match &selected.payload {
+        StreamPayload::DirectHttp { total_bytes, .. } => *total_bytes,
+        _ => None,
+    };
+
+    Ok(SimulateReport {
+        ok: true,
+        simulated: true,
+        url: redact_sensitive_url(&job.url),
+        title: source.title,
+        stream_id: selected.id.clone(),
+        dual_stream: false,
+        container: ext.to_string(),
+        output_path: output_path.to_string_lossy().into_owned(),
+        expected_bytes,
+        width: selected.width,
+        height: selected.height,
+    })
+}
 
 pub async fn execute_download(
     config: &RuvidConfig,
