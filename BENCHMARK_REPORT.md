@@ -43,7 +43,7 @@ All tests were executed locally on a dedicated Windows workstation under control
 | **Network Interfaces** | Dual-homed: Turkcell Superonline (192.168.60.99) & Türk Telekom (192.168.50.99) |
 | **Egress Binding IP** | `82.222.228.32` (`192.168.60.99`, Turkcell Superonline Fiber) |
 | **ruvid Binary** | `ruvid 0.1.0` (Release build, pure Rust, 7,251,456 bytes) |
-| **ruvic Binary** | `ruvic 0.1.0` (Release build, pure Rust, 3,911,680 bytes) |
+| **ruvic Binary** | `ruvic 0.1.0` (Release build, pure Rust, strip+LTO, 3,662,848 bytes) |
 | **yt-dlp Binary** | `yt-dlp 2026.10.26` (Python 3.10 standalone runtime) |
 | **ffmpeg / ffprobe** | `ffmpeg/ffprobe N-127043-g5a54fcf75e-20260930` (Gyan.dev GPL x64 build, 168 MB) |
 

@@ -17,13 +17,13 @@ xychart-beta
     title "Uygulama Boyutu Kıyaslaması (MB - Düşük Daha İyi)"
     x-axis ["ruvic.exe", "ruvid.exe", "RuviTools Toplam", "yt-dlp + deno", "ffmpeg + ffprobe", "Piyasa Yığını Toplamı"]
     y-axis "Disk Boyutu (MB)" 0 --> 380
-    bar [3.73, 6.87, 10.60, 140, 220, 360]
+    bar [3.49, 7.01, 10.50, 140, 220, 360]
 ```
 
 ```text
-ruvic.exe (Native Motor)   █ 3.73 MB
-ruvid.exe (İndirici)       ██ 6.87 MB
-RuviTools Toplam           ███ 10.60 MB  (Sıfır Bağımlılık — ~34x daha küçük)
+ruvic.exe (Native Motor)   █ 3.49 MB
+ruvid.exe (İndirici)       ██ 7.01 MB
+RuviTools Toplam           ███ 10.50 MB  (Sıfır Bağımlılık — ~34x daha küçük)
 yt-dlp + deno runtime      ███████████████████████ ~140 MB
 ffmpeg + ffprobe           ████████████████████████████████████ ~220 MB
 Piyasa Yığını Toplamı      ████████████████████████████████████████████████████████████ ~360 MB
@@ -92,14 +92,14 @@ xychart-beta
 
 ```mermaid
 flowchart LR
-    subgraph RUVID["ruvid.exe (6.87 MB — ~10.7 MB Özel RAM)"]
+    subgraph RUVID["ruvid.exe (7.01 MB — ~10.7 MB Özel RAM)"]
         A["YouTube / HLS / DASH URL"] --> B["Saf Rust Innertube Çözümleyici"]
         B --> C["Range: bytes=0-0 Dinamik Yoklama"]
         C --> D["--jobs N Paralel Range Akışı (64 KB Tampon)"]
         D --> E[".part Atomik Yazım + Checkpoint"]
     end
 
-    subgraph RUVIC["ruvic.exe (3.73 MB — 0.8–3.5 MB Özel RAM)"]
+    subgraph RUVIC["ruvic.exe (3.49 MB — 0.8–3.5 MB Özel RAM)"]
         F["Seek Tabanlı moov / EBML Probe"] --> G["validate_moov_integrity (Exit 8 Koruma)"]
         G --> H["stco / co64 Offset Rebasing & Faststart"]
         H --> I["copy_chunked (64 KB Okuma / 1 MB BufWriter)"]
@@ -115,15 +115,15 @@ flowchart LR
 
 | Araç / Paket | Bileşenler | Toplam Disk Boyutu | Çalışma Zamanı Bağımlılığı |
 |---|---|---:|---|
-| **`ruvid.exe`** (CLI İndirici) | Tekil native Rust ikilisi | **7,208,448 B (~6.87 MB)** | **Sıfır** (Saf Rust, gömülü Innertube + Range + HLS/DASH + XML altyazı) |
-| **`ruvic.exe`** (CLI Medya Motoru) | Tekil native Rust ikilisi | **3,911,680 B (~3.73 MB)** | **Sıfır** (Saf Rust native ISO-BMFF/MP4 + EBML/WebM + ADTS motoru) |
-| **`ruvi-studio.exe`** (Masaüstü GUI) | **`egui`/`eframe` + `ruvid` + `ruvic` tekil `.exe`** | **9,316,352 B (~8.88 MB)** | **Sıfır** (Hem indiriciyi hem medya motorunu doğrudan kütüphane olarak içerir) |
-| **RuviTools CLI Toplamı (`ruvid` + `ruvic`)** | İndirici + Medya Motoru | **11,120,128 B (~10.60 MB)** | **Sıfır harici ikili veya script çalışma zamanı** |
+| **`ruvid.exe`** (CLI İndirici) | Tekil native Rust ikilisi | **7,350,784 B (~7.01 MB)** | **Sıfır** (Saf Rust, gömülü Innertube + Range + HLS/DASH + XML altyazı) |
+| **`ruvic.exe`** (CLI Medya Motoru) | Tekil native Rust ikilisi | **3,662,848 B (~3.49 MB)** | **Sıfır** (Saf Rust native ISO-BMFF/MP4 + EBML/WebM + ADTS motoru) |
+| **`ruvi-studio.exe`** (Masaüstü GUI) | **`egui`/`eframe` + `ruvid` + `ruvic` tekil `.exe`** | **9,948,160 B (~9.49 MB)** | **Sıfır** (Hem indiriciyi hem medya motorunu doğrudan kütüphane olarak içerir) |
+| **RuviTools CLI Toplamı (`ruvid` + `ruvic`)** | İndirici + Medya Motoru | **11,013,632 B (~10.50 MB)** | **Sıfır harici ikili veya script çalışma zamanı** |
 | Piyasa Referansı: `yt-dlp` + `deno` | `yt-dlp.exe` (~18 MB PyInstaller) + `deno.exe` (~110–130 MB V8 JS runtime) | **~130–148 MB** | Python gömülü arşiv açımı + JS imza çözücü alt süreci |
 | Piyasa Referansı: `ffmpeg` + `ffprobe` | `ffmpeg.exe` (~85–140 MB) + `ffprobe.exe` (~85–140 MB) | **~170–280 MB** | Harici C/C++ ikilileri |
 | **Piyasa Yığını Toplamı** | `yt-dlp` + `deno` + `ffmpeg` + `ffprobe` | **~300–428 MB** | 4 ayrı ikili + süreçler arası spawn yükü |
 
-> **Sonuç:** `ruvid.exe` + `ruvic.exe` ikilisi toplam **10.60 MB** boyutuyla klasik `yt-dlp + deno + ffmpeg + ffprobe` yığınına kıyasla **~28x – 40x daha küçük** disk ayak izine sahiptir.
+> **Sonuç:** `ruvid.exe` + `ruvic.exe` ikilisi toplam **10.50 MB** boyutuyla klasik `yt-dlp + deno + ffmpeg + ffprobe` yığınına kıyasla **~28x – 40x daha küçük** disk ayak izine sahiptir.
 
 ---
 

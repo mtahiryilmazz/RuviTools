@@ -7,7 +7,7 @@ Son güncelleme: 2026-11-16
 Her iki uygulama da harici araçlara (`yt-dlp`, `deno`, `ffmpeg`, `ffprobe`) bağımlı olmayan **%100 saf Rust** çekirdeği ile **"minimal bellek yükü, yüksek hız ve sistem bütünlüğü"** ilkeleri temelinde tamamlandı, uçtan uca test edildi ve release `.exe` çıktıları üretildi:
 
 - **`ruvid/` (`d:\mtahiryilmazz\Github\RuviTools\ruvid`) — RUVID (Rust Video Downloader)**
-  - Release ikilisi: `ruvid\target\release\ruvid.exe` (**7,208,448 B / ~6.87 MB**)
+  - Release ikilisi: `ruvid\target\release\ruvid.exe` (**7,350,784 B / ~7.01 MB**)
   - Kalite Kapıları: `cargo fmt --all -- --check` ✅ · `cargo clippy --all-targets -- -D warnings` ✅ · `cargo test` (**103/103** birim ve entegrasyon testi geçti) ✅
   - Yetenekler:
     - Dinamik `Range: bytes=0-0` yoklaması ile `contentLength` bilinmeyen akışları (ör. YouTube `itag-18`) otomatik olarak paralel `--jobs` parça indirmeye yükseltme ve ilerleme çubuğunu (`set_total`) dinamik güncelleme.
@@ -19,7 +19,7 @@ Her iki uygulama da harici araçlara (`yt-dlp`, `deno`, `ffmpeg`, `ffprobe`) ba�
     - YouTube oynatma listeleri (`ytInitialData`), RSS/Atom podcast beslemeleri ve M3U/JSON kataloglarını toplu kuyrukla indirme (`playlist`).
 
 - **`ruvic/` (`d:\mtahiryilmazz\Github\RuviTools\ruvic`) — RUVIC (Rust Video Converter & Native Media Engine)**
-  - Release ikilisi: `ruvic\target\release\ruvic.exe` (**3,911,680 B / ~3.73 MB**)
+  - Release ikilisi: `ruvic\target\release\ruvic.exe` (**3,662,848 B / ~3.49 MB**)
   - Kalite Kapıları: `cargo fmt --all -- --check` ✅ · `cargo clippy --all-targets -- -D warnings` ✅ · `cargo test` (**106/106** birim ve entegrasyon testi geçti) ✅
   - Yetenekler:
     - **Minimal Bellek Yükü (Streaming I/O):** Medya dosyalarının tamamını RAM'e yükleyen `std::fs::read` yerine seek tabanlı `BufReader` / `BufWriter` ve `copy_chunked` (64 KB okuma / 1 MB yazma tamponu) mimarisi (50.3 MB MP4 remux işleminde yalnızca **3.53 MB** özel RAM kullanımı).
@@ -30,7 +30,7 @@ Her iki uygulama da harici araçlara (`yt-dlp`, `deno`, `ffmpeg`, `ffprobe`) ba�
     - **Sıkı Sistem Bütünlüğü (`ExitCode::Integrity = 8`):** `validate_moov_integrity` ile yazım öncesi `stco`/`co64` tablo boyutu, version/flags=0, EOF sınır aşımı ve alt kutu taşmalarını denetleyip bozuk girdileri reddetme; atomik geçici dosya yazımı ve hata anında temizlik.
 
 - **`ruvi-gui/` (`d:\mtahiryilmazz\Github\RuviTools\ruvi-gui`) — RuviStudio Masaüstü GUI (`egui` / `eframe`)**
-  - Release ikilisi: `ruvi-gui\target\release\ruvi-studio.exe` (**9,316,352 B / ~8.88 MB**)
+  - Release ikilisi: `ruvi-gui\target\release\ruvi-studio.exe` (**9,948,160 B / ~9.49 MB**)
   - Kalite Kapıları: `cargo fmt --all -- --check` ✅ · `cargo clippy --all-targets -- -D warnings` ✅ · `cargo test` (**2/2** entegrasyon testi geçti) ✅
   - Mimari: `ruvid` ve `ruvic` crate'lerini alt süreç başlatmadan doğrudan Rust kütüphanesi olarak bağlar; 4 sekmeli karanlık tema stüdyo arayüzü (**1. Video İndirici**, **2. Medya Stüdyosu (`ruvic` Native Motor)**, **3. Playlist & Podcast Kuyruğu**, **4. Performans & Bellek Monitörü**) sunar.
 
@@ -40,7 +40,7 @@ Detaylı ölçümler [BENCHMARK.md](file:///d:/mtahiryilmazz/Github/RuviTools/BE
 
 | Metrik | RuviTools (`ruvid` + `ruvic`) | Piyasa Referansı (`yt-dlp` + `deno` + `ffmpeg`) |
 |---|---|---|
-| **Toplam Uygulama Boyutu** | **10.60 MB** (`ruvid.exe` 6.87 MB + `ruvic.exe` 3.73 MB) | **~300 – 428 MB** |
+| **Toplam Uygulama Boyutu** | **10.50 MB** (`ruvid.exe` 7.01 MB + `ruvic.exe` 3.49 MB) | **~300 – 428 MB** |
 | **Soğuk Başlangıç (`--version`)** | `ruvid`: **50.23 ms** · `ruvic`: **30.95 ms** | `yt-dlp`: ~450 – 1,200 ms |
 | **Canlı YouTube İndirme (`--jobs 4`)** | **1.88 sn** (8 Range parçası) · **10.74 MB** özel RAM | Harici Python + Deno süreci |
 | **Canlı YouTube DASH Video+Ses + Otomatik Remux** | **1.54 sn** (16 Range parçası + `ruvic remux`) · **10.83 MB** özel RAM | `yt-dlp` + `ffmpeg` alt süreç birleştirme |
