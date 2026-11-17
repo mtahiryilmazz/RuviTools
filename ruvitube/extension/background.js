@@ -73,6 +73,7 @@ async function getSettings() {
     audioQuality: '320kbps',
     clipLength: 30,
     jobs: DEFAULT_JOBS,
+    jobsCount: '4',
     rememberClip: true,
     showStatus: true
   }, s);
@@ -85,6 +86,22 @@ async function getSettings() {
 function sendToTab(tabId, message) {
   if (tabId === null || tabId === undefined) return;
   chrome.tabs.sendMessage(tabId, message).catch(() => {});
+}
+
+function isFirefoxBrowser() {
+  return (typeof browser !== 'undefined' && typeof browser.runtime?.getBrowserInfo === 'function')
+    || (typeof navigator !== 'undefined' && typeof navigator.userAgent === 'string' && navigator.userAgent.includes('Firefox'));
+}
+
+function openDownloadsPage() {
+  const url = isFirefoxBrowser() ? 'about:downloads' : 'chrome://downloads/';
+  try {
+    Promise.resolve(chrome.tabs.create({ url })).catch(() => {
+      try { chrome.downloads.showDefaultFolder(); } catch (_) { /* yoksay */ }
+    });
+  } catch (_) {
+    try { chrome.downloads.showDefaultFolder(); } catch (_) { /* yoksay */ }
+  }
 }
 
 function isYoutubeUrl(url) {
@@ -224,7 +241,7 @@ async function afterDownload(job) {
       try { await shellNative('open_folder', ''); } catch (_) { /* yoksay */ }
     }
   }
-  if (settings.openDownloads) chrome.tabs.create({ url: 'chrome://downloads/' }).catch(() => {});
+  if (settings.openDownloads) openDownloadsPage();
 }
 
 async function promoteQueued() {
@@ -273,6 +290,8 @@ async function startNativeJob(job) {
     const settings = await getSettings();
     const rawJobs = (job.jobs !== undefined && job.jobs !== null) ? job.jobs : settings.jobs;
     const jobs = normalizeJobs(rawJobs);
+    const settings = await getSettings();
+    const jobs = parseInt(settings.jobsCount || job.jobs || '4', 10) || 4;
     const port = connectHost(job.jobId);
     port.postMessage({
       action: 'download',
@@ -281,6 +300,7 @@ async function startNativeJob(job) {
       quality: job.quality,
       url: job.url,
       jobs,
+      jobs: jobs,
       clip: job.clip || null
     });
   } catch (e) {
@@ -413,7 +433,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (message.target) return;
 
   if (message.action === 'open_downloads') {
-    chrome.tabs.create({ url: 'chrome://downloads/' });
+    openDownloadsPage();
     sendResponse({ ok: true });
     return;
   }

@@ -7,7 +7,7 @@ use ruvi_gui::{ActiveTab, MediaOperationKind, RuviStudioApp, StudioTheme, config
 fn app_builds_download_job_with_all_options() {
     let mut app = RuviStudioApp::default();
     assert_eq!(app.active_tab, ActiveTab::Downloader);
-    assert_eq!(app.media_op, MediaOperationKind::RemuxFaststart);
+    assert_eq!(app.media_op, MediaOperationKind::ConvertVideo);
 
     app.url_input = "https://www.youtube.com/watch?v=jNQXAC9IVRw".to_string();
     app.format_spec = "2160p".to_string();

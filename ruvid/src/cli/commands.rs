@@ -362,7 +362,10 @@ fn read_batch_file_entries(path: &Path) -> RuviResult<Vec<PlaylistEntry>> {
         buf
     } else {
         std::fs::read_to_string(path).map_err(|err| {
-            RuviError::Filesystem(format!("failed reading batch file {}: {err}", path.display()))
+            RuviError::Filesystem(format!(
+                "failed reading batch file {}: {err}",
+                path.display()
+            ))
         })?
     };
 

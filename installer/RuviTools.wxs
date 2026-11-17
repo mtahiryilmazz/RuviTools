@@ -1,0 +1,69 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+  <Package
+    Name="RuviTools"
+    Manufacturer="RuviTools"
+    Version="$(var.Version)"
+    UpgradeCode="D7A9C3B4-5E21-4F8B-9A34-6C12E8D4F001"
+    Scope="perUser">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="RuviStudioIcon" SourceFile="$(var.IconPath)" />
+    <Property Id="ARPPRODUCTICON" Value="RuviStudioIcon" />
+
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="INSTALLFOLDER" Name="RuviTools">
+        <Component Id="CoreBinaries" Guid="9F3E1C2A-8B4D-4E5F-9012-3456789ABCDE">
+          <File Id="RuviStudioExe" Source="$(var.BinDir)\ruvi-studio.exe" KeyPath="yes" />
+          <File Id="RuvidExe" Source="$(var.BinDir)\ruvid.exe" />
+          <File Id="RuvicExe" Source="$(var.BinDir)\ruvic.exe" />
+          <File Id="NativeHostExe" Source="$(var.BinDir)\NativeHost.exe" />
+          <File Id="ChromeNativeManifest" Source="$(var.BinDir)\com.ruvitube.nativehost.json" />
+          <File Id="FirefoxNativeManifest" Source="$(var.BinDir)\com.ruvitube.nativehost.firefox.json" />
+        </Component>
+
+        <Component Id="UserPathAndNativeHosts" Guid="A1B2C3D4-E5F6-4789-ABCD-1234567890EF">
+          <RegistryValue Root="HKCU" Key="Software\RuviTools" Name="Installed" Type="integer" Value="1" KeyPath="yes" />
+          <Environment Id="EnvUserPath" Name="PATH" Value="[INSTALLFOLDER]" Permanent="no" Part="last" Action="set" System="no" />
+          <RegistryKey Root="HKCU" Key="Software\Google\Chrome\NativeMessagingHosts\com.ruvitube.nativehost">
+            <RegistryValue Type="string" Value="[INSTALLFOLDER]com.ruvitube.nativehost.json" />
+          </RegistryKey>
+          <RegistryKey Root="HKCU" Key="Software\Mozilla\NativeMessagingHosts\com.ruvitube.nativehost">
+            <RegistryValue Type="string" Value="[INSTALLFOLDER]com.ruvitube.nativehost.firefox.json" />
+          </RegistryKey>
+        </Component>
+
+        <Directory Id="RuviTubeFolder" Name="ruvitube">
+          <Directory Id="ExtFolder" Name="extension" />
+        </Directory>
+      </Directory>
+    </StandardDirectory>
+
+    <StandardDirectory Id="ProgramMenuFolder">
+      <Directory Id="ApplicationProgramsFolder" Name="RuviTools">
+        <Component Id="StartMenuShortcut" Guid="B2C3D4E5-F6A7-4890-BCDE-2345678901FA">
+          <Shortcut Id="RuviStudioStartMenuShortcut"
+                    Name="RuviStudio"
+                    Description="RuviStudio — Pure-Rust Video Downloader &amp; Media Studio"
+                    Target="[INSTALLFOLDER]ruvi-studio.exe"
+                    WorkingDirectory="INSTALLFOLDER"
+                    Icon="RuviStudioIcon" />
+          <RemoveFolder Id="CleanUpStartMenuFolder" On="uninstall" />
+          <RegistryValue Root="HKCU" Key="Software\RuviTools" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+        </Component>
+      </Directory>
+    </StandardDirectory>
+
+    <ComponentGroup Id="ExtensionFiles" Directory="ExtFolder">
+      <Files Include="$(var.ExtDir)\**" />
+    </ComponentGroup>
+
+    <Feature Id="MainFeature" Title="RuviTools Suite" Level="1">
+      <ComponentRef Id="CoreBinaries" />
+      <ComponentRef Id="UserPathAndNativeHosts" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentGroupRef Id="ExtensionFiles" />
+    </Feature>
+  </Package>
+</Wix>

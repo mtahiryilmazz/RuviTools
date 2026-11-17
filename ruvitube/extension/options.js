@@ -31,6 +31,7 @@ const DEFAULTS = {
   audioQuality: '320kbps',
   clipLength: 30,
   jobs: 4,
+  jobsCount: '4',
   rememberClip: true,
   showStatus: true
 };
@@ -44,7 +45,7 @@ function normalizeJobs(raw) {
 }
 
 const CHECKS = ['openDownloads', 'openFile', 'openFolder', 'rememberClip', 'showStatus'];
-const SELECTS = ['videoQuality', 'audioQuality'];
+const SELECTS = ['videoQuality', 'audioQuality', 'jobsCount'];
 const $ = id => document.getElementById(id);
 
 function applyI18n() {

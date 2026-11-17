@@ -10,7 +10,12 @@ description = "GeTube v2.0 Pure-Rust Chrome Native Messaging Host powered in-pro
 name = "NativeHost"
 path = "src/main.rs"
 
+[features]
+default = []
+mimalloc = ["dep:mimalloc"]
+
 [dependencies]
+mimalloc = { version = "0.1", optional = true }
 ruvid = { path = "../ruvid" }
 ruvic = { path = "../ruvic" }
 serde = { version = "1", features = ["derive"] }

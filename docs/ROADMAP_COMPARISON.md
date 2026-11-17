@@ -7,15 +7,12 @@
 
 ## Özet Sonuç
 
-RuviTools'un **%100 Saf Rust çekirdek yığını** (`ruvid`, `ruvic`, `ruvi-native-host`, `ruvi-gui`, `ruvitube` Chrome MV3 ve canlı benchmark raporları) halihazırda **tamamlanmış ve çalışır durumdadır**.
+RuviTools'un **%100 Saf Rust çekirdek yığını** (`ruvid`, `ruvic`, `ruvi-native-host`, `ruvi-gui`, `ruvitube` Chrome/Firefox MV3 ve canlı benchmark raporları) ile yol haritasındaki **P0, P1 ve P2** iyileştirmeleri **hayata geçirilmiş ve doğrulanmıştır**:
+- **P0 (Güvenlik & Otomasyon):** `deny.toml`, `.github/workflows/ci.yml`, `ruvitube/installer/{Install,Uninstall}.ps1`, `scripts/verify-all.ps1`.
+- **P1 (CLI, Firefox & Windows Paketleme):** `ruvid` + `ruvic` `completions <shell>` (`clap_complete`), `ruvid get --simulate`, `ruvid playlist -a/--batch-file` + tam bayrak geçişi (`--subtitles`, `--audio-lang`, `--write-manifest`, `--split-chapters`), `ruvitube/extension/manifest.firefox.json` + `background.js` `about:downloads` koruması + `install-core.ps1` Mozilla `NativeMessagingHosts` kaydı, `scripts/build-release.ps1` + WiX v7 `installer/RuviTools.wxs` (`.msi` + taşınabilir `.zip`).
+- **P2 (Bellek Ayırıcı Optimizasyonu):** Tüm 4 binary hedefte (`ruvid`, `ruvic`, `ruvi-native-host`, `ruvi-gui`) `lib.rs`'e dokunmadan yalnızca `src/main.rs` içinde `--features mimalloc` bayrağıyla etkinleştirilebilen opt-in `mimalloc` global allocator.
 
-Yol haritasındaki iyileştirmelerin **P0 (sıfır çakışmalı, acil)** bölümü bu çalışma kapsamında depoya eklendi:
-- Tedarik zinciri ve lisans denetimi (`deny.toml`)
-- Çoklu crate CI/CD otomasyonu (`.github/workflows/ci.yml`)
-- Eksik konsol kurulum/kaldırma betiklerinin onarımı (`ruvitube/installer/Install.ps1` & `Uninstall.ps1`)
-- Birleşik doğrulama betiği (`scripts/verify-all.ps1`)
-
-Geriye kalan **P1 (CLI zenginleştirmeleri, Firefox MV3 desteği, WiX v7 `.msi` paketleme, `rustls-tls` geçişi)** ve **P2 (`mimalloc` bellek ayırıcı — benchmark kapılı)** maddeleri ise aktif M1 UI/Jobs teslimatları sonrasında uygulanmak üzere planlanmıştır.
+İsteğe bağlı gelecek iyileştirme olarak `reqwest` için `rustls-tls` geçişi (`openssl-sys` bağımlılığının tamamen kaldırılması) `deny.toml` istisna notuyla takip edilmektedir.
 
 ---
 
@@ -43,39 +40,15 @@ Geriye kalan **P1 (CLI zenginleştirmeleri, Firefox MV3 desteği, WiX v7 `.msi` 
 
 ---
 
-## 3. Eklenmesi Önerilen Kalan İyileştirmeler (P1 & P2 Yol Haritası)
+## 3. P1 & P2 Kapsamında Uygulanan ve Doğrulanan İyileştirmeler
 
-### P1 — M1 Teslimatları Tamamlanır Tamamlanmaz Uygulanmalı (Yüksek Değer)
-
-1. **CLI Zenginleştirmeleri (`ruvid` & `ruvic`)**
-   - *Mevcut boşluk:* `ruvid` ve `ruvic` içinde `clap_complete` yok; `ruvid/src/cli/args.rs` içinde `GetArgs` kuru çalıştırma (`--simulate`) içermiyor; `PlaylistArgs` yalnızca tek URL alıyor (`--batch-file` yok) ve `ruvid/src/cli/commands.rs` içindeki `handle_playlist` altyazı/ses/manifest bayraklarını sabit `false`/`None` bırakıyor.
-   - *Eklenecekler:*
-     - `ruvid` ve `ruvic` için `completions <shell>` alt komutu (`clap_complete`).
-     - `ruvid get --simulate` (ağ indirmesi ve disk yazımı olmadan çözümleme/dosya adı önizlemesi).
-     - `ruvid playlist --batch-file <PATH>` (`-` ile stdin desteği) ve `--subtitles`, `--subtitles-lang`, `--sub-format`, `--auto-subs`, `--audio-lang`, `--write-manifest`, `--split-chapters` geçişi.
-
-2. **Firefox MV3 Desteği ve Çift Tarayıcı Kurulumu (`ruvitube`)**
-   - *Mevcut boşluk:* `ruvitube/extension/manifest.json` yalnızca Chrome'a özgü (`service_worker`, `minimum_chrome_version`, `key`); `background.js` içinde `chrome://downloads/` açılıyor; `install-core.ps1` yalnızca `HKCU:\Software\Google\Chrome\NativeMessagingHosts` yazıyor. (`NativeHost.exe` dosyaları doğrudan `Downloads\GeTube` klasörüne taşıdığı için Firefox'un `file://` kısıtı engel olmaktan çıkmıştır.)
-   - *Eklenecekler:*
-     - `ruvitube/extension/manifest.firefox.json` (`background.scripts` + `browser_specific_settings.gecko.id`).
-     - `background.js` içinde `chrome://downloads/` vs `about:downloads` tarayıcı koruması.
-     - `install-core.ps1` içinde `HKCU:\Software\Mozilla\NativeMessagingHosts\com.ruvitube.nativehost` kaydı (`allowed_extensions`).
-
-3. **Birleşik Windows Release Paketleyici & WiX v7 `.msi` Kurulumu**
-   - *Mevcut boşluk:* Makinede `wix 7.0.0` kurulu olmasına rağmen `scripts/build-release.ps1` ve `.wxs` tanımı yok; `ruvitube/bin/` yalnızca `NativeHost.exe` içeriyor, `ruvi-studio.exe` dağıtım paketine dahil değil.
-   - *Eklenecekler:*
-     - `scripts/build-release.ps1`: 4 ikiliyi (`ruvi-studio.exe`, `ruvid.exe`, `ruvic.exe`, `NativeHost.exe`) release derleyip taşınabilir `.zip` ve Chrome/Firefox eklenti paketlerini üretmesi.
-     - `installer/RuviTools.wxs`: Kullanıcı bazlı (`Scope="perUser"`) `.msi` kurulumu (Başlat Menüsü kısayolu, `PATH`, Chrome + Firefox Native Messaging kayıtları).
-
-4. **`reqwest` Saf Rust TLS (`rustls-tls`) Geçişi**
-   - *Mevcut boşluk:* 4 `Cargo.lock` dosyasından 3'ünde (`ruvid`, `ruvi-native-host`, `ruvi-gui`) `reqwest 0.12` varsayılan özellikleri nedeniyle `native-tls` → `openssl` → `openssl-sys` bağımlılık grafiğinde yer alıyor (aynı anda `rustls` de bulunuyor).
-   - *Eklenecek:* `ruvid/Cargo.toml` içinde `reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }` geçişi yapılıp `deny.toml` içindeki `openssl-sys` istisnası tamamen yasağa (`deny`) çevrilmeli.
-
-### P2 — Benchmark Kapılı Optimizasyon
-
-5. **`mimalloc` Global Bellek Ayırıcı**
-   - *Mevcut boşluk:* Kaynak kodda `global_allocator` veya `mimalloc` kullanımı yok (`Cargo.lock` içinde yer almıyor; makinede VS 2022 `cl.exe` ve `crates.io` erişimi mevcut).
-   - *Önerilen yaklaşım:* `lib.rs` içine eklemeden, yalnızca binary `main.rs` hedeflerinde (`ruvid`, `ruvic`, `ruvi-native-host`, `ruvi-gui`) `--features mimalloc` bayrağı altında denenmeli ve `BENCHMARK.md` içindeki 50.3 MB remux (**3.53 MB** özel RAM) ile `ruvid --jobs 8` (**8.505 sn**) taban çizgilerine karşı bellek/hız artışı ölçülerek varsayılan yapılıp yapılmayacağına karar verilmeli.
+| Aşama | Bileşen / Dosya | Durum | Uygulanan Teknik Kapsam |
+|---|---|---|---|
+| **P1** | **CLI Zenginleştirmeleri (`ruvid` & `ruvic`)**<br>`ruvid/src/cli/{args,commands,render}.rs`, `ruvid/src/downloader/engine.rs`, `ruvic/src/cli/{args,commands}.rs`, `*/tests/cli_tests.rs` | **Uygulandı** | • `clap_complete = "4"` ile `ruvid completions <shell>` ve `ruvic completions <shell>` (`bash`, `zsh`, `fish`, `powershell`, `elvish`).<br>• `ruvid get --simulate` (medya indirmeden ve disk dizini/dosyası oluşturmadan çözümleme, akış seçimi ve çıktı yolu önizlemesi; JSON ve insan okunur çıktı).<br>• `ruvid playlist -a/--batch-file <PATH>` (`-` ile stdin, `#` yorum ve boş satır filtreleme) + `--subtitles`, `--subtitles-lang`, `--sub-format`, `--auto-subs`, `--audio-lang`, `--write-manifest`, `--split-chapters` geçişleri.<br>• `ruvid/tests/cli_tests.rs` ve `ruvic/tests/cli_tests.rs` entegrasyon testleri. |
+| **P1** | **Firefox MV3 & Çift Tarayıcı Kurulumu (`ruvitube`)**<br>`ruvitube/extension/manifest.firefox.json`, `background.js`, `ruvitube/installer/install-core.ps1` | **Uygulandı** | • `manifest.firefox.json`: `background.scripts`, `browser_specific_settings.gecko.id = "ruvitube@ruvitools.dev"` (`strict_min_version: "115.0"`), Chrome'a özgü `key`/`minimum_chrome_version` kaldırıldı.<br>• `background.js`: Worker B `--jobs` mantığı korunarak `chrome://downloads/` vs `about:downloads` (+ `downloads.showDefaultFolder()` geri dönüşü) koruması eklendi.<br>• `install-core.ps1`: `com.ruvitube.nativehost.firefox.json` (`allowed_extensions`) üretimi ve `HKCU:\Software\Mozilla\NativeMessagingHosts\com.ruvitube.nativehost` kayıt/doğrulama/kaldırma desteği eklendi. |
+| **P1** | **Birleşik Windows Release Paketleyici & WiX v7 `.msi`**<br>`scripts/build-release.ps1`, `installer/RuviTools.wxs` | **Uygulandı** | • `installer/RuviTools.wxs`: `Scope="perUser"` MSI kurulumu (`ruvi-studio.exe`, `ruvid.exe`, `ruvic.exe`, `NativeHost.exe`, `ruvitube/extension/`, Başlat Menüsü `RuviStudio` kısayolu, kullanıcı `PATH`, Chrome + Firefox `NativeMessagingHosts` kayıtları).<br>• `scripts/build-release.ps1`: 4 crate release derlemesi, `ruvitube/bin` SHA256 senkronizasyonu, Chrome & Firefox `.zip`, taşınabilir `.zip` ve `wix build` ile `dist/RuviTools-v0.1.0-win64.msi` üretimi. |
+| **P2** | **İsteğe Bağlı `mimalloc` Global Bellek Ayırıcı**<br>`{ruvid,ruvic,ruvi-native-host,ruvi-gui}/{Cargo.toml,src/main.rs}` | **Uygulandı** | • Tüm 4 crate için `mimalloc = { version = "0.1", optional = true }` ve `[features] mimalloc = ["dep:mimalloc"]` eklendi.<br>• Yalnızca binary `src/main.rs` dosyalarında `#[cfg(feature = "mimalloc")] #[global_allocator]` tanımlandı (`lib.rs` temiz tutuldu).<br>• Varsayılan derleme/testler ile `--features mimalloc` derleme/testleri ve `--version` kontrolleri doğrulandı. |
+| **İsteğe Bağlı (Gelecek)** | **`reqwest` Saf Rust TLS (`rustls-tls`) Geçişi** | **Planlı** | • `ruvid/Cargo.toml` içinde `default-features = false, features = ["rustls-tls", "stream", "json"]` geçişi yapılarak `deny.toml` içindeki geçici `openssl-sys` wrapper istisnası tamamen kaldırılabilir. |
 
 ---
 

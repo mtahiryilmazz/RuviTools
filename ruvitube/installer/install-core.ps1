@@ -16,6 +16,7 @@ $ExtDir           = Join-Path $AppDir 'extension'
 $NativeExe        = Join-Path $AppDir 'NativeHost.exe'
 $HostName         = 'com.ruvitube.nativehost'
 $ExtId            = 'npbogohemcamnnhpmbnialffkfkbeimn'
+$FirefoxExtId     = 'ruvitube@ruvitools.dev'
 $ChromeProfileDir = Join-Path $AppDir 'chrome-profile'
 $ChromeDebugPortFile = Join-Path $ChromeProfileDir 'DevToolsActivePort'
 $ShortcutPath     = Join-Path ([Environment]::GetFolderPath('Desktop')) 'RuviTube.lnk'
@@ -135,7 +136,27 @@ function Register-Host{
   $reg="HKCU:\Software\Google\Chrome\NativeMessagingHosts\$HostName"
   New-Item -Path $reg -Force | Out-Null
   New-ItemProperty -Path $reg -Name '(Default)' -Value $manifest -PropertyType String -Force | Out-Null
-  Invoke-Log '✓ Native Messaging kaydı tamamlandı.'
+  Invoke-Log '✓ Chrome Native Messaging kaydı tamamlandı.'
+
+  Register-FirefoxHost
+}
+
+function Register-FirefoxHost{
+  $ffManifest=Join-Path $AppDir ($HostName+'.firefox.json')
+  $ffJson=@"
+{
+  "name": "$HostName",
+  "description": "RuviTube native host",
+  "path": "$($NativeExe.Replace('\','\\'))",
+  "type": "stdio",
+  "allowed_extensions": ["$FirefoxExtId"]
+}
+"@
+  [IO.File]::WriteAllText($ffManifest,$ffJson,(New-Object Text.UTF8Encoding($false)))
+  $ffReg="HKCU:\Software\Mozilla\NativeMessagingHosts\$HostName"
+  New-Item -Path $ffReg -Force | Out-Null
+  New-ItemProperty -Path $ffReg -Name '(Default)' -Value $ffManifest -PropertyType String -Force | Out-Null
+  Invoke-Log '✓ Firefox Native Messaging kaydı tamamlandı.'
 }
 
 function Verify-Registration{
@@ -149,7 +170,23 @@ function Verify-Registration{
     if($cfg.path -ne $NativeExe){ throw "Manifest path beklenenden farklı: $($cfg.path)" }
     if(($cfg.allowed_origins -notcontains "chrome-extension://$ExtId/")){ throw 'allowed_origins eşleşmiyor.' }
   } catch { throw "Manifest doğrulanamadı: $($_.Exception.Message)" }
-  Invoke-Log '✓ Native Messaging kaydı doğrulandı.'
+  Invoke-Log '✓ Chrome Native Messaging kaydı doğrulandı.'
+
+  Verify-FirefoxRegistration
+}
+
+function Verify-FirefoxRegistration{
+  $ffManifest=Join-Path $AppDir ($HostName+'.firefox.json')
+  $ffReg='HKCU:\Software\Mozilla\NativeMessagingHosts\'+$HostName
+  if(!(Test-Path -LiteralPath $ffManifest)){ throw 'Firefox Native Messaging manifest dosyası bulunamadı.' }
+  $ffValue=(Get-ItemProperty -Path $ffReg -Name '(Default)' -ErrorAction SilentlyContinue).'(default)'
+  if(!$ffValue){ throw 'Firefox Native Messaging kayıt defteri kaydı yok.' }
+  try {
+    $ffCfg=Get-Content -LiteralPath $ffManifest -Raw -Encoding UTF8 | ConvertFrom-Json
+    if($ffCfg.path -ne $NativeExe){ throw "Firefox manifest path beklenenden farklı: $($ffCfg.path)" }
+    if(($ffCfg.allowed_extensions -notcontains $FirefoxExtId)){ throw 'allowed_extensions eşleşmiyor.' }
+  } catch { throw "Firefox manifest doğrulanamadı: $($_.Exception.Message)" }
+  Invoke-Log '✓ Firefox Native Messaging kaydı doğrulandı.'
 }
 
 function Clear-Staging{
@@ -431,7 +468,10 @@ function Invoke-Uninstall{
   Invoke-Log 'GeTube kaldırılıyor...'
 
   $reg = "HKCU:\Software\Google\Chrome\NativeMessagingHosts\$HostName"
-  if (Test-Path $reg) { Remove-Item $reg -Recurse -Force; Invoke-Log "  ✓ Kayıt defteri girdisi silindi: $HostName" }
+  if (Test-Path $reg) { Remove-Item $reg -Recurse -Force; Invoke-Log "  ✓ Chrome kayıt defteri girdisi silindi: $HostName" }
+
+  $ffReg = "HKCU:\Software\Mozilla\NativeMessagingHosts\$HostName"
+  if (Test-Path $ffReg) { Remove-Item $ffReg -Recurse -Force; Invoke-Log "  ✓ Firefox kayıt defteri girdisi silindi: $HostName" }
 
   Get-Process -Name 'NativeHost' -ErrorAction SilentlyContinue | ForEach-Object {
     try { $_.Kill(); Invoke-Log "  ✓ Çalışan süreç kapatıldı: $($_.Id)" } catch {}

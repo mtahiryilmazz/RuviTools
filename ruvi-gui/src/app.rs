@@ -9,6 +9,7 @@ use ruvic::backend::native::container_probe::probe_media_file;
 use ruvic::config::RuvicConfig;
 use ruvic::domain::conversion_job::OperationResult;
 use ruvic::domain::media_info::MediaInfo;
+use ruvic::operations::convert::{ConvertRequest, execute_convert};
 use ruvic::operations::extract_audio::{ExtractAudioRequest, execute_extract_audio};
 use ruvic::operations::remux::{RemuxRequest, execute_remux};
 use ruvic::operations::thumbnail::{ThumbnailRequest, execute_thumbnail};
@@ -135,6 +136,7 @@ impl ActiveTab {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MediaOperationKind {
+    ConvertVideo,
     RemuxFaststart,
     TrimRange,
     ExtractAudioAac,
@@ -145,6 +147,7 @@ pub enum MediaOperationKind {
 impl MediaOperationKind {
     pub fn label(self) -> &'static str {
         match self {
+            Self::ConvertVideo => "Video Dönüştürme (Convert / Transcode)",
             Self::RemuxFaststart => "Faststart Remux (MP4 / WebM)",
             Self::TrimRange => "Zaman Araligi Kesme (Trim)",
             Self::ExtractAudioAac => "Ses Cikarimi (ADTS .aac)",
@@ -489,6 +492,9 @@ pub struct RuviStudioApp {
     pub media_secondary_audio_path: String,
     pub media_output_path: String,
     pub media_op: MediaOperationKind,
+    pub convert_video_codec: String,
+    pub convert_audio_codec: String,
+    pub convert_preset: String,
     pub trim_start: String,
     pub trim_duration: f64,
     pub thumbnail_at: String,
@@ -586,8 +592,11 @@ impl RuviStudioApp {
             last_download: None,
             media_input_path: String::new(),
             media_secondary_audio_path: String::new(),
-            media_output_path: "./downloads/output_faststart.mp4".to_string(),
-            media_op: MediaOperationKind::RemuxFaststart,
+            media_output_path: "./downloads/output.mp4".to_string(),
+            media_op: MediaOperationKind::ConvertVideo,
+            convert_video_codec: "h264".to_string(),
+            convert_audio_codec: "aac".to_string(),
+            convert_preset: "fast".to_string(),
             trim_start: "00:00:02".to_string(),
             trim_duration: 5.0,
             thumbnail_at: "00:00:02".to_string(),
@@ -1430,6 +1439,21 @@ impl RuviStudioApp {
             Some(PathBuf::from(self.media_secondary_audio_path.trim()))
         };
         let op = self.media_op;
+        let convert_video = if self.convert_video_codec.trim().is_empty() {
+            None
+        } else {
+            Some(self.convert_video_codec.trim().to_string())
+        };
+        let convert_audio = if self.convert_audio_codec.trim().is_empty() {
+            None
+        } else {
+            Some(self.convert_audio_codec.trim().to_string())
+        };
+        let convert_preset = if self.convert_preset.trim().is_empty() {
+            None
+        } else {
+            Some(self.convert_preset.trim().to_string())
+        };
         let trim_start = self.trim_start.trim().to_string();
         let trim_dur = self.trim_duration.max(0.1);
         let thumb_at = self.thumbnail_at.trim().to_string();
@@ -1444,6 +1468,30 @@ impl RuviStudioApp {
             let backend = NativeMediaBackend::new();
             let config = RuvicConfig::default();
             let res = match op {
+                MediaOperationKind::ConvertVideo => {
+                    execute_convert(
+                        &backend,
+                        &config,
+                        None,
+                        ConvertRequest {
+                            input,
+                            output,
+                            video: convert_video,
+                            audio: convert_audio,
+                            quality: None,
+                            speed: None,
+                            preset: convert_preset,
+                            overwrite: true,
+                            threads: None,
+                            hwaccel: None,
+                            video_stream: None,
+                            audio_stream: None,
+                            subtitle: None,
+                        },
+                        false,
+                    )
+                    .await
+                }
                 MediaOperationKind::RemuxFaststart => {
                     execute_remux(
                         &backend,
@@ -2476,6 +2524,7 @@ impl RuviStudioApp {
                         ui.label("İşlem Türü:");
                         ui.horizontal_wrapped(|ui| {
                             for kind in [
+                                MediaOperationKind::ConvertVideo,
                                 MediaOperationKind::RemuxFaststart,
                                 MediaOperationKind::TrimRange,
                                 MediaOperationKind::ExtractAudioAac,
@@ -2487,7 +2536,43 @@ impl RuviStudioApp {
                         });
                         ui.end_row();
 
-                        if self.media_op == MediaOperationKind::TrimRange {
+                        if self.media_op == MediaOperationKind::ConvertVideo {
+                            ui.label("Video Codec:");
+                            ui.horizontal(|ui| {
+                                for v in ["h264", "h265", "vp9", "av1", "copy"] {
+                                    if ui
+                                        .selectable_label(self.convert_video_codec == v, v)
+                                        .clicked()
+                                    {
+                                        self.convert_video_codec = v.to_string();
+                                    }
+                                }
+                            });
+                            ui.end_row();
+
+                            ui.label("Ses Codec:");
+                            ui.horizontal(|ui| {
+                                for a in ["aac", "opus", "mp3", "flac", "copy"] {
+                                    if ui
+                                        .selectable_label(self.convert_audio_codec == a, a)
+                                        .clicked()
+                                    {
+                                        self.convert_audio_codec = a.to_string();
+                                    }
+                                }
+                            });
+                            ui.end_row();
+
+                            ui.label("Hız Profili (Preset):");
+                            ui.horizontal(|ui| {
+                                for p in ["ultrafast", "fast", "medium", "slow", "veryslow"] {
+                                    if ui.selectable_label(self.convert_preset == p, p).clicked() {
+                                        self.convert_preset = p.to_string();
+                                    }
+                                }
+                            });
+                            ui.end_row();
+                        } else if self.media_op == MediaOperationKind::TrimRange {
                             ui.label("Trim Başlangıç & Süre (sn):");
                             ui.horizontal(|ui| {
                                 ui.add(

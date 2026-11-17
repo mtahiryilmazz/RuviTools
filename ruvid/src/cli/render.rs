@@ -107,11 +107,6 @@ pub fn render_simulate_human(report: &SimulateReport, quiet: bool) {
     };
     println!(
         "[simulate] {} | stream={} ({}{} | {}) -> {}",
-        report.title,
-        report.stream_id,
-        report.container,
-        dims_part,
-        size_part,
-        report.output_path
+        report.title, report.stream_id, report.container, dims_part, size_part, report.output_path
     );
 }

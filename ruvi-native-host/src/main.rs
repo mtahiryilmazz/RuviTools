@@ -2,6 +2,10 @@ use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
+#[cfg(feature = "mimalloc")]
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use ruvic::backend::native::NativeMediaBackend;
 use ruvic::config::RuvicConfig;
 use ruvic::operations::extract_audio::{ExtractAudioRequest, execute_extract_audio};

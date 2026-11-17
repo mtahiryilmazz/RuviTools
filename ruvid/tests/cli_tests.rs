@@ -225,9 +225,9 @@ async fn playlist_batch_file_and_passthrough_flags_work() {
     assert_eq!(stdin_report["total_selected"], 1);
     assert_eq!(stdin_report["succeeded"], 1);
 
-    // Missing both URL and --batch-file should fail CLI argument parsing
+    // Missing both URL and --batch-file should fail CLI argument parsing (ExitCode::ConfigOrArgs = 2)
     common::ruvid_cmd(tmp.path())
         .args(["playlist"])
         .assert()
-        .code(4);
+        .code(2);
 }

@@ -1,0 +1,52 @@
+{
+  "manifest_version": 3,
+  "name": "RuviTube",
+  "version": "2.0.0",
+  "description": "RuviTube v2.0 (RuviTools Saf Rust Motoru): YouTube videolarını, seslerini ve seçilen zaman aralığını (klip) yüksek hızla indir.",
+  "default_locale": "tr",
+  "permissions": [
+    "nativeMessaging",
+    "downloads",
+    "storage"
+  ],
+  "host_permissions": [
+    "https://www.youtube.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": [
+        "https://www.youtube.com/watch*"
+      ],
+      "js": [
+        "shared/clip-time.js",
+        "content.js"
+      ],
+      "run_at": "document_idle"
+    }
+  ],
+  "background": {
+    "scripts": [
+      "background.js"
+    ]
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "__MSG_extName__"
+  },
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "browser_specific_settings": {
+    "gecko": {
+      "id": "ruvitube@ruvitools.dev",
+      "strict_min_version": "115.0"
+    }
+  },
+  "icons": {
+    "16": "icon16.png",
+    "32": "icon32.png",
+    "48": "icon48.png",
+    "128": "icon128.png"
+  }
+}

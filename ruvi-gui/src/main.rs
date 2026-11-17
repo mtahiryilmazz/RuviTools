@@ -32,7 +32,7 @@ fn main() -> eframe::Result<()> {
         let ctx = egui::Context::default();
         configure_fonts(&ctx);
         let _ = ctx.run(egui::RawInput::default(), |ctx| {
-            app.render_ui(ctx);
+            app.render_headless(ctx);
         });
 
         println!("ruvi-studio headless self-test: OK");

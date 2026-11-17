@@ -10,6 +10,10 @@ description = "RUVID — Rust Video Downloader (HTTP, Range/Resume, HLS/DASH VOD
 name = "ruvid"
 path = "src/main.rs"
 
+[features]
+default = []
+mimalloc = ["dep:mimalloc"]
+
 [dependencies]
 anyhow = "1"
 async-trait = "0.1"
@@ -19,6 +23,7 @@ clap_complete = "4"
 directories = "6"
 futures = "0.3"
 indicatif = "0.17"
+mimalloc = { version = "0.1", optional = true }
 quick-xml = "0.37"
 reqwest = { version = "0.12", features = ["stream", "json"] }
 serde = { version = "1", features = ["derive"] }

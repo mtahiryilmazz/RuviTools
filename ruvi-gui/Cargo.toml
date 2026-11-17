@@ -14,9 +14,14 @@ path = "src/lib.rs"
 name = "ruvi-studio"
 path = "src/main.rs"
 
+[features]
+default = []
+mimalloc = ["dep:mimalloc"]
+
 [dependencies]
 ab_glyph = "0.2"
 eframe = "0.31"
+mimalloc = { version = "0.1", optional = true }
 ruvid = { path = "../ruvid" }
 ruvic = { path = "../ruvic" }
 serde = { version = "1", features = ["derive"] }
