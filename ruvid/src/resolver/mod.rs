@@ -68,7 +68,9 @@ impl ResolveContext {
         if !full_headers.contains_key(reqwest::header::ACCEPT) {
             full_headers.insert(
                 reqwest::header::ACCEPT,
-                reqwest::header::HeaderValue::from_static("text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"),
+                reqwest::header::HeaderValue::from_static(
+                    "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+                ),
             );
         }
         if !full_headers.contains_key(reqwest::header::ACCEPT_LANGUAGE) {
@@ -126,9 +128,11 @@ impl ResolveContext {
             .build()
             .map_err(|err| RuviError::Network(format!("failed to construct HTTP client: {err}")))?;
 
-        let no_redirect_client = no_redirect_builder
-            .build()
-            .map_err(|err| RuviError::Network(format!("failed to construct no-redirect HTTP client: {err}")))?;
+        let no_redirect_client = no_redirect_builder.build().map_err(|err| {
+            RuviError::Network(format!(
+                "failed to construct no-redirect HTTP client: {err}"
+            ))
+        })?;
 
         Ok(Self {
             client,
@@ -163,12 +167,16 @@ impl ResolveContext {
 
             if status.is_redirection() {
                 if let Some(loc) = loc_opt {
-                    let loc_str = loc
-                        .to_str()
-                        .map_err(|e| crate::downloader::retry::RetryableError::Permanent(RuviError::Network(e.to_string())))?;
-                    let next_url = current_url
-                        .join(loc_str)
-                        .map_err(|e| crate::downloader::retry::RetryableError::Permanent(RuviError::Network(e.to_string())))?;
+                    let loc_str = loc.to_str().map_err(|e| {
+                        crate::downloader::retry::RetryableError::Permanent(RuviError::Network(
+                            e.to_string(),
+                        ))
+                    })?;
+                    let next_url = current_url.join(loc_str).map_err(|e| {
+                        crate::downloader::retry::RetryableError::Permanent(RuviError::Network(
+                            e.to_string(),
+                        ))
+                    })?;
                     current_url = next_url;
                     continue;
                 }
@@ -176,9 +184,9 @@ impl ResolveContext {
 
             return Ok((resp, current_url));
         }
-        Err(crate::downloader::retry::RetryableError::Permanent(RuviError::Network(
-            "too many redirects following range request".to_string(),
-        )))
+        Err(crate::downloader::retry::RetryableError::Permanent(
+            RuviError::Network("too many redirects following range request".to_string()),
+        ))
     }
 
     pub fn validate_url(&self, raw: &str) -> RuviResult<Url> {

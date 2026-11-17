@@ -51,19 +51,33 @@ async function persist(jobs) {
   await chrome.storage.session.set({ [JOBS_KEY]: jobs });
 }
 
+const DEFAULT_JOBS = 4;
+const MIN_JOBS = 1;
+const MAX_JOBS = 16;
+
+function normalizeJobs(raw) {
+  if (raw === undefined || raw === null || raw === '') return DEFAULT_JOBS;
+  const n = Math.round(Number(raw));
+  if (!Number.isFinite(n)) return DEFAULT_JOBS;
+  return Math.min(MAX_JOBS, Math.max(MIN_JOBS, n));
+}
+
 async function getSettings() {
   const stored = await chrome.storage.local.get(SETTINGS_KEY);
   const s = (stored && stored[SETTINGS_KEY]) || {};
-  return Object.assign({
+  const merged = Object.assign({
     openDownloads: false,
     openFile: false,
     openFolder: false,
     videoQuality: '720p',
     audioQuality: '320kbps',
     clipLength: 30,
+    jobs: DEFAULT_JOBS,
     rememberClip: true,
     showStatus: true
   }, s);
+  merged.jobs = normalizeJobs(s.jobs !== undefined ? s.jobs : s.jobsCount);
+  return merged;
 }
 
 /* ---------------------------------------------------------------- helpers */
@@ -136,6 +150,7 @@ function publicJob(job) {
     label: job.label,
     type: job.type,
     quality: job.quality,
+    jobs: normalizeJobs(job.jobs),
     clip: job.clip,
     state: job.state,
     percent: job.percent || 0,
@@ -255,6 +270,9 @@ function connectHost(jobId) {
 
 async function startNativeJob(job) {
   try {
+    const settings = await getSettings();
+    const rawJobs = (job.jobs !== undefined && job.jobs !== null) ? job.jobs : settings.jobs;
+    const jobs = normalizeJobs(rawJobs);
     const port = connectHost(job.jobId);
     port.postMessage({
       action: 'download',
@@ -262,6 +280,7 @@ async function startNativeJob(job) {
       type: job.type,
       quality: job.quality,
       url: job.url,
+      jobs,
       clip: job.clip || null
     });
   } catch (e) {
@@ -461,31 +480,39 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const jobId = (self.crypto && crypto.randomUUID) ? crypto.randomUUID()
     : Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 10);
   const tabId = sender && sender.tab ? sender.tab.id : null;
-  const job = {
-    jobId,
-    tabId,
-    type,
-    quality,
-    url,
-    clip,
-    label: labelFor(type, quality, clip),
-    state: 'queued',
-    percent: 0,
-    status: 'Hazırlanıyor...',
-    createdAt: Date.now(),
-    updatedAt: Date.now()
-  };
 
-  withLock(async () => {
-    const jobs = await getJobs();
-    jobs[jobId] = job;
-    await persist(jobs);
-    updateBadge(jobs);
-    return activeCount(jobs) <= MAX_ACTIVE;
-  }).then(canStartNow => {
-    sendResponse({ ok: true, jobId, label: job.label });
+  (async () => {
+    const settings = await getSettings();
+    const rawJobs = (message.jobs !== undefined && message.jobs !== null)
+      ? message.jobs
+      : (message.jobsCount !== undefined && message.jobsCount !== null ? message.jobsCount : settings.jobs);
+    const jobsCount = normalizeJobs(rawJobs);
+    const job = {
+      jobId,
+      tabId,
+      type,
+      quality,
+      jobs: jobsCount,
+      url,
+      clip,
+      label: labelFor(type, quality, clip),
+      state: 'queued',
+      percent: 0,
+      status: 'Hazırlanıyor...',
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    };
+
+    const canStartNow = await withLock(async () => {
+      const jobs = await getJobs();
+      jobs[jobId] = job;
+      await persist(jobs);
+      updateBadge(jobs);
+      return activeCount(jobs) <= MAX_ACTIVE;
+    });
+    sendResponse({ ok: true, jobId, label: job.label, jobs: jobsCount });
     if (canStartNow) promoteQueued();
-  }).catch(e => sendResponse({ ok: false, error: (e && e.message) || 'İş oluşturulamadı.' }));
+  })().catch(e => sendResponse({ ok: false, error: (e && e.message) || 'İş oluşturulamadı.' }));
 
   return true;
 });

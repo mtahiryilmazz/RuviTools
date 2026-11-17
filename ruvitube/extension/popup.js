@@ -5,12 +5,22 @@
 const TR = {
   popupLast: 'Son işler',
   popupIdle: 'Bekleyen indirme yok',
+  popupJobs: 'Paralel Range Parçaları (--jobs)',
   popupSettings: 'Ayarlar',
   popupDownloads: 'İndirilenler',
   popupOpenYoutube: "YouTube'da bir video açın",
   statusDone: 'Tamamlandı',
   statusError: 'Hata'
 };
+
+const SETTINGS_KEY = 'ruvitube.settings';
+const VALID_JOBS = [1, 2, 4, 8, 16];
+function normalizeJobs(raw) {
+  const n = Math.round(Number(raw));
+  if (!Number.isFinite(n)) return 4;
+  if (VALID_JOBS.includes(n)) return n;
+  return Math.min(16, Math.max(1, n));
+}
 
 const $ = id => document.getElementById(id);
 
@@ -72,8 +82,36 @@ async function loadJobs() {
   visible.forEach(job => container.appendChild(renderJob(job)));
 }
 
+async function loadJobsSetting() {
+  try {
+    const stored = await chrome.storage.local.get(SETTINGS_KEY);
+    const s = (stored && stored[SETTINGS_KEY]) || {};
+    const j = normalizeJobs(s.jobs !== undefined ? s.jobs : s.jobsCount);
+    $('jobsSelect').value = String(VALID_JOBS.includes(j) ? j : 4);
+  } catch (_) {
+    $('jobsSelect').value = '4';
+  }
+}
+
+$('jobsSelect').addEventListener('change', async () => {
+  const jobs = normalizeJobs($('jobsSelect').value);
+  try {
+    const stored = await chrome.storage.local.get(SETTINGS_KEY);
+    const current = (stored && stored[SETTINGS_KEY]) || {};
+    await chrome.storage.local.set({ [SETTINGS_KEY]: Object.assign({}, current, { jobs }) });
+  } catch (_) {}
+});
+
+chrome.storage.onChanged.addListener((changes, area) => {
+  if (area !== 'local' || !changes[SETTINGS_KEY]) return;
+  const s = changes[SETTINGS_KEY].newValue || {};
+  const j = normalizeJobs(s.jobs !== undefined ? s.jobs : s.jobsCount);
+  $('jobsSelect').value = String(VALID_JOBS.includes(j) ? j : 4);
+});
+
 applyI18n();
 loadJobs();
+loadJobsSetting();
 
 $('options').addEventListener('click', () => {
   chrome.runtime.openOptionsPage();

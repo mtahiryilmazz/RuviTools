@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256">
+  <defs>
+    <linearGradient id="bgGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b131e"/>
+      <stop offset="55%" stop-color="#0d1e26"/>
+      <stop offset="100%" stop-color="#082825"/>
+    </linearGradient>
+    <radialGradient id="ambientGlow" cx="28%" cy="22%" r="72%">
+      <stop offset="0%" stop-color="#10b981" stop-opacity="0.26"/>
+      <stop offset="60%" stop-color="#06b6d4" stop-opacity="0.09"/>
+      <stop offset="100%" stop-color="#0b131e" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="ringGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#34d399"/>
+      <stop offset="50%" stop-color="#10b981"/>
+      <stop offset="100%" stop-color="#38bdf8"/>
+    </linearGradient>
+    <linearGradient id="rGrad" x1="15%" y1="10%" x2="85%" y2="95%">
+      <stop offset="0%" stop-color="#ecfdf5"/>
+      <stop offset="55%" stop-color="#a7f3d0"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+    <linearGradient id="boltGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#38bdf8"/>
+      <stop offset="55%" stop-color="#22d3ee"/>
+      <stop offset="100%" stop-color="#34d399"/>
+    </linearGradient>
+  </defs>
+
+  <!-- Squircle container -->
+  <rect x="14" y="14" width="228" height="228" rx="52" fill="url(#bgGrad)" stroke="url(#ringGrad)" stroke-width="10"/>
+  <rect x="19" y="19" width="218" height="218" rx="47" fill="url(#ambientGlow)"/>
+  <rect x="24" y="24" width="208" height="208" rx="42" fill="none" stroke="#ffffff" stroke-opacity="0.08" stroke-width="2"/>
+
+  <!-- Subtle speed stream wave ribbon behind mark -->
+  <path d="M 38 176 C 76 160, 112 190, 152 170 C 176 158, 196 142, 212 126"
+        fill="none" stroke="#10b981" stroke-opacity="0.22" stroke-width="10" stroke-linecap="round"/>
+
+  <!-- Custom geometric 'R' monogram (no stock font, evenodd cutout) -->
+  <path fill="url(#rGrad)" fill-rule="evenodd" d="
+    M 60 56
+    L 120 56
+    A 42 42 0 0 1 120 140
+    L 108 140
+    L 152 198
+    L 118 198
+    L 86 146
+    L 86 198
+    L 56 198
+    L 56 60
+    Z
+    M 86 82
+    L 86 114
+    L 118 114
+    A 16 16 0 0 0 118 82
+    Z
+  "/>
+
+  <!-- High-speed download lightning bolt accent (crisp gap from R bowl) -->
+  <path fill="url(#boltGrad)" d="
+    M 196 56
+    L 172 104
+    L 191 104
+    L 174 156
+    L 210 92
+    L 190 92
+    Z
+  "/>
+
+  <!-- Stream download speed chevron pair at bottom-right -->
+  <path fill="#38bdf8" d="M 158 176 L 176 187 L 158 198 Z"/>
+  <path fill="#34d399" d="M 178 176 L 196 187 L 178 198 Z"/>
+</svg>

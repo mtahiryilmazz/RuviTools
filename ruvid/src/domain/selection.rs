@@ -44,7 +44,9 @@ pub fn select_stream_with_lang<'a>(
         if let Some(best_m4a) = audios
             .iter()
             .copied()
-            .filter(|s| s.container.eq_ignore_ascii_case("m4a") || s.container.eq_ignore_ascii_case("mp4"))
+            .filter(|s| {
+                s.container.eq_ignore_ascii_case("m4a") || s.container.eq_ignore_ascii_case("mp4")
+            })
             .max_by_key(|s| s.bandwidth_bps.unwrap_or(0))
         {
             return Ok(best_m4a);

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use eframe::egui;
-use ruvi_gui::RuviStudioApp;
+use ruvi_gui::{RuviStudioApp, configure_fonts};
 
 fn main() -> eframe::Result<()> {
     let args: Vec<String> = std::env::args().skip(1).collect();
@@ -28,21 +28,41 @@ fn main() -> eframe::Result<()> {
         let job = app.build_download_job();
         assert_eq!(job.jobs, 4);
         app.poll_events();
+
+        let ctx = egui::Context::default();
+        configure_fonts(&ctx);
+        let _ = ctx.run(egui::RawInput::default(), |ctx| {
+            app.render_ui(ctx);
+        });
+
         println!("ruvi-studio headless self-test: OK");
         return Ok(());
     }
 
+    let icon_data = eframe::icon_data::from_png_bytes(include_bytes!("../assets/ruvi-studio.png"))
+        .ok()
+        .map(Arc::new);
+
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([1160.0, 740.0])
+        .with_min_inner_size([900.0, 580.0])
+        .with_title("RuviStudio — Saf Rust Video İndirici (ruvid) & Medya Motoru (ruvic)");
+
+    if let Some(icon) = icon_data {
+        viewport = viewport.with_icon(icon);
+    }
+
     let native_options = eframe::NativeOptions {
-        viewport: egui::ViewportBuilder::default()
-            .with_inner_size([1080.0, 720.0])
-            .with_min_inner_size([860.0, 560.0])
-            .with_title("RuviStudio — Saf Rust Video İndirici (ruvid) & Medya Motoru (ruvic)"),
+        viewport,
         ..Default::default()
     };
 
     eframe::run_native(
         "RuviStudio",
         native_options,
-        Box::new(|_cc| Ok(Box::new(RuviStudioApp::default()))),
+        Box::new(|cc| {
+            configure_fonts(&cc.egui_ctx);
+            Ok(Box::new(RuviStudioApp::default()))
+        }),
     )
 }

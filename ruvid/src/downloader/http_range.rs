@@ -138,12 +138,17 @@ pub async fn download_direct_http(
         if let Some(t) = total_bytes {
             progress.set_total(t);
         }
-        (url.to_string(), total_bytes, accept_ranges, etag, last_modified)
+        (
+            url.to_string(),
+            total_bytes,
+            accept_ranges,
+            etag,
+            last_modified,
+        )
     };
     let url = &resolved_url;
 
-    let can_parallel_range =
-        accept_ranges && total_bytes.is_some_and(|t| t >= 16 * 1024);
+    let can_parallel_range = accept_ranges && total_bytes.is_some_and(|t| t >= 16 * 1024);
 
     if !can_parallel_range {
         if !plan.resume {

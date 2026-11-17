@@ -1,0 +1,92 @@
+name: RuviTools CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  rust:
+    name: ${{ matrix.crate }} (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - crate: ruvid
+            os: ubuntu-latest
+          - crate: ruvid
+            os: windows-latest
+          - crate: ruvic
+            os: ubuntu-latest
+          - crate: ruvic
+            os: windows-latest
+          - crate: ruvi-native-host
+            os: windows-latest
+          - crate: ruvi-gui
+            os: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ${{ matrix.crate }}
+
+      - name: Check formatting
+        run: cargo fmt --manifest-path ${{ matrix.crate }}/Cargo.toml --all -- --check
+
+      - name: Run clippy
+        run: cargo clippy --manifest-path ${{ matrix.crate }}/Cargo.toml --all-targets -- -D warnings
+
+      - name: Run tests
+        run: cargo test --manifest-path ${{ matrix.crate }}/Cargo.toml
+
+  cargo-deny:
+    name: cargo-deny (${{ matrix.crate }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        crate:
+          - ruvid
+          - ruvic
+          - ruvi-native-host
+          - ruvi-gui
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Run cargo-deny check
+        uses: EmbarkStudios/cargo-deny-action@v2
+        with:
+          command: check
+          manifest-path: ${{ matrix.crate }}/Cargo.toml
+          arguments: --all-features --config deny.toml
+
+  scripts-and-extension:
+    name: PowerShell & Extension Verification
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Validate extension JSON, installer PS1s, and Cargo.lock sources
+        shell: pwsh
+        run: |
+          & .\scripts\verify-all.ps1 -SkipRust
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }

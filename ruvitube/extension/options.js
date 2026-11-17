@@ -9,6 +9,8 @@ const TR = {
   optVideoQuality: 'Varsayılan görüntü kalitesi',
   optAudioQuality: 'Varsayılan ses kalitesi',
   optClipLength: 'Varsayılan kesit süresi (saniye)',
+  optJobs: 'Paralel Range Parçaları (--jobs)',
+  optJobsHint: 'Aynı anda indirilecek HTTP Range parça sayısı',
   optAfterDownload: 'İndirme sonrası',
   optOpenDownloads: 'Chrome İndirilenler sayfasını aç',
   optOpenFile: 'İndirilen dosyayı aç',
@@ -28,9 +30,18 @@ const DEFAULTS = {
   videoQuality: '720p',
   audioQuality: '320kbps',
   clipLength: 30,
+  jobs: 4,
   rememberClip: true,
   showStatus: true
 };
+
+const VALID_JOBS = [1, 2, 4, 8, 16];
+function normalizeJobs(raw) {
+  const n = Math.round(Number(raw));
+  if (!Number.isFinite(n)) return DEFAULTS.jobs;
+  if (VALID_JOBS.includes(n)) return n;
+  return Math.min(16, Math.max(1, n));
+}
 
 const CHECKS = ['openDownloads', 'openFile', 'openFolder', 'rememberClip', 'showStatus'];
 const SELECTS = ['videoQuality', 'audioQuality'];
@@ -49,6 +60,7 @@ function readForm() {
   const value = {};
   CHECKS.forEach(id => { value[id] = $(id).checked; });
   SELECTS.forEach(id => { value[id] = $(id).value; });
+  value.jobs = normalizeJobs($('jobs').value);
   const clip = Number($('clipLength').value);
   value.clipLength = isFinite(clip) ? Math.max(1, Math.round(clip)) : DEFAULTS.clipLength;
   return value;
@@ -57,6 +69,8 @@ function readForm() {
 function render(settings) {
   CHECKS.forEach(id => { $(id).checked = !!settings[id]; });
   SELECTS.forEach(id => { $(id).value = settings[id]; });
+  const normalizedJobs = normalizeJobs(settings.jobs);
+  $('jobs').value = String(VALID_JOBS.includes(normalizedJobs) ? normalizedJobs : DEFAULTS.jobs);
   $('clipLength').value = String(settings.clipLength);
 }
 
@@ -75,13 +89,18 @@ function scheduleSave() {
 
 async function load() {
   const stored = await chrome.storage.local.get(SETTINGS_KEY);
-  render(Object.assign({}, DEFAULTS, (stored && stored[SETTINGS_KEY]) || {}));
+  const raw = (stored && stored[SETTINGS_KEY]) || {};
+  const merged = Object.assign({}, DEFAULTS, raw);
+  if (raw.jobs === undefined && raw.jobsCount !== undefined) {
+    merged.jobs = normalizeJobs(raw.jobsCount);
+  }
+  render(merged);
 }
 
 applyI18n();
 load();
 
-CHECKS.concat(SELECTS).forEach(id => {
+CHECKS.concat(SELECTS, ['jobs']).forEach(id => {
   $(id).addEventListener('change', scheduleSave);
 });
 $('clipLength').addEventListener('change', scheduleSave);

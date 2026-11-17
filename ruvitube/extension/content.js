@@ -20,13 +20,29 @@
     openFolder: false,
     videoQuality: '720p',
     audioQuality: '320kbps',
-    clipLength: 30
+    clipLength: 30,
+    jobs: 4
   };
+
+  const VALID_JOBS = [1, 2, 4, 8, 16];
+  function normalizeJobs(raw) {
+    const n = Math.round(Number(raw));
+    if (!Number.isFinite(n)) return DEFAULTS.jobs;
+    if (VALID_JOBS.includes(n)) return n;
+    return Math.min(16, Math.max(1, n));
+  }
 
   const QUALITY_LABELS = {
     '1080p': '1080p (MP4)', '720p': '720p (MP4)', '480p': '480p (MP4)', 'best': 'En iyi (MP4)'
   };
   const AUDIO_LABELS = { '320kbps': '320 kbps', '192kbps': '192 kbps' };
+  const JOBS_LABELS = {
+    '1': '1 parça (--jobs 1)',
+    '2': '2 parça (--jobs 2)',
+    '4': '4 parça (--jobs 4)',
+    '8': '8 parça (--jobs 8)',
+    '16': '16 parça (--jobs 16)'
+  };
   const CHIPS = [15, 30, 60, 180, 300, 600];
 
   const state = window.__RUVITUBE_STATE__ || window.__GETUBE_STATE__ || (window.__RUVITUBE_STATE__ = {
@@ -48,6 +64,7 @@
     clipClose: 'Kapat',
     clipDownloadVideo: 'MP4 indir',
     clipDownloadAudio: 'MP3 indir',
+    clipJobs: 'Paralel (--jobs)',
     clipFull: 'Tam videoyu indir',
     clipPlaceholder: '1:23 veya 01:23:45',
     clipChapters: 'Bölümler',
@@ -282,7 +299,9 @@
   function loadSettings() {
     chrome.storage.local.get(SETTINGS_KEY, stored => {
       const saved = (stored && stored[SETTINGS_KEY]) || {};
-      state.settings = Object.assign({}, DEFAULTS, saved);
+      const merged = Object.assign({}, DEFAULTS, saved);
+      merged.jobs = normalizeJobs(saved.jobs !== undefined ? saved.jobs : saved.jobsCount);
+      state.settings = merged;
       if (state.panel) state.panel.sync();
     });
   }
@@ -294,7 +313,10 @@
 
   chrome.storage.onChanged.addListener((changes, area) => {
     if (area !== 'local' || !changes[SETTINGS_KEY]) return;
-    state.settings = Object.assign({}, DEFAULTS, changes[SETTINGS_KEY].newValue || {});
+    const saved = changes[SETTINGS_KEY].newValue || {};
+    const merged = Object.assign({}, DEFAULTS, saved);
+    merged.jobs = normalizeJobs(saved.jobs !== undefined ? saved.jobs : saved.jobsCount);
+    state.settings = merged;
     if (state.panel) state.panel.sync();
   });
 
@@ -444,6 +466,10 @@
               <select id="aq"></select>
               <button class="primary" id="audio"></button>
             </div>
+            <div class="row" style="align-items:center">
+              <label id="lblJobs" for="jobs" style="font-size:11px;color:#aaa;min-width:108px"></label>
+              <select id="jobs"></select>
+            </div>
             <div class="row">
               <button class="secondary" id="fullV"></button>
               <button class="secondary" id="fullA"></button>
@@ -484,6 +510,7 @@
     $('close').textContent = t('clipClose', 'Kapat');
     $('video').textContent = t('clipDownloadVideo', 'MP4 indir');
     $('audio').textContent = t('clipDownloadAudio', 'MP3 indir');
+    $('lblJobs').textContent = t('clipJobs', 'Paralel (--jobs)');
     $('full').textContent = t('clipFull', 'Tam videoyu indir');
     $('start').placeholder = t('clipPlaceholder', '1:23 veya 01:23:45');
     $('end').placeholder = t('clipPlaceholder', '1:23 veya 01:23:45');
@@ -533,6 +560,12 @@
       option.textContent = label;
       $('aq').appendChild(option);
     }
+    for (const value of VALID_JOBS) {
+      const option = document.createElement('option');
+      option.value = String(value);
+      option.textContent = JOBS_LABELS[String(value)] || String(value);
+      $('jobs').appendChild(option);
+    }
 
     CHIPS.forEach(seconds => {
       const chip = document.createElement('button');
@@ -558,6 +591,8 @@
     function sync() {
       $('vq').value = state.settings.videoQuality || '720p';
       $('aq').value = state.settings.audioQuality || '320kbps';
+      const j = normalizeJobs(state.settings.jobs);
+      $('jobs').value = String(VALID_JOBS.includes(j) ? j : DEFAULTS.jobs);
       shadow.querySelectorAll('.toggle').forEach(toggle => {
         const on = !!state.settings[toggle.dataset.setting];
         toggle.setAttribute('aria-pressed', on ? 'true' : 'false');
@@ -707,6 +742,7 @@
     }));
     $('vq').addEventListener('change', () => saveSettings({ videoQuality: $('vq').value }));
     $('aq').addEventListener('change', () => saveSettings({ audioQuality: $('aq').value }));
+    $('jobs').addEventListener('change', () => saveSettings({ jobs: normalizeJobs($('jobs').value) }));
 
     $('video').addEventListener('click', () => submit('Video', $('vq').value));
     $('audio').addEventListener('click', () => submit('MP3', $('aq').value));
@@ -795,7 +831,8 @@
   /* -------------------------------------------------------------- download */
 
   function start(type, quality, clip) {
-    const payload = { action: 'download', type, quality, url: location.href };
+    const jobs = normalizeJobs(state.settings.jobs);
+    const payload = { action: 'download', type, quality, url: location.href, jobs };
     if (clip) {
       payload.clip = { startSec: clip.startSec, endSec: clip.endSec };
       if (clip.chapterTitle) payload.clip.chapterTitle = clip.chapterTitle;

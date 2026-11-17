@@ -1,6 +1,7 @@
 use assert_cmd::Command;
+use eframe::egui::{self, Color32};
 use predicates::prelude::*;
-use ruvi_gui::{ActiveTab, MediaOperationKind, RuviStudioApp, StudioTheme};
+use ruvi_gui::{ActiveTab, MediaOperationKind, RuviStudioApp, StudioTheme, configure_fonts, icons};
 
 #[test]
 fn app_builds_download_job_with_all_options() {
@@ -37,7 +38,34 @@ fn app_builds_download_job_with_all_options() {
 }
 
 #[test]
-fn theme_switching_visuals_and_card_frames() {
+fn all_six_tabs_metadata_and_navigation() {
+    let primary = ActiveTab::primary_tabs();
+    assert_eq!(primary.len(), 5);
+    assert!(!primary.contains(&ActiveTab::Settings));
+
+    let all = ActiveTab::all();
+    assert_eq!(
+        all,
+        &[
+            ActiveTab::Downloader,
+            ActiveTab::MediaStudio,
+            ActiveTab::PlaylistQueue,
+            ActiveTab::Telemetry,
+            ActiveTab::RuviTube,
+            ActiveTab::Settings,
+        ]
+    );
+
+    for &tab in all {
+        assert!(!tab.icon().trim().is_empty());
+        assert!(!tab.label().trim().is_empty());
+        assert_eq!(tab.title(), tab.label());
+        assert!(!tab.subtitle().trim().is_empty());
+    }
+}
+
+#[test]
+fn oxibot_dark_and_light_theme_tokens() {
     assert_eq!(StudioTheme::default(), StudioTheme::Dark);
 
     let dark = StudioTheme::Dark;
@@ -48,6 +76,20 @@ fn theme_switching_visuals_and_card_frames() {
     assert!(dark_vis.dark_mode);
     assert!(!light_vis.dark_mode);
 
+    // Verify exact OxiBot GitHub Dark & GitHub Light tokens
+    assert_eq!(dark_vis.panel_fill, Color32::from_rgb(13, 17, 23));
+    assert_eq!(dark_vis.window_fill, Color32::from_rgb(22, 27, 34));
+    assert_eq!(dark.border_color(), Color32::from_rgb(48, 54, 61));
+    assert_eq!(dark.brand_fill(), Color32::from_rgb(31, 111, 235));
+    assert_eq!(dark.accent_primary(), Color32::from_rgb(63, 185, 80));
+    assert_eq!(dark.accent_secondary(), Color32::from_rgb(88, 166, 255));
+    assert_eq!(dark.accent_purple(), Color32::from_rgb(168, 85, 247));
+
+    assert_eq!(light_vis.panel_fill, Color32::from_rgb(246, 248, 250));
+    assert_eq!(light_vis.window_fill, Color32::from_rgb(255, 255, 255));
+    assert_eq!(light.border_color(), Color32::from_rgb(208, 215, 222));
+    assert_eq!(light.brand_fill(), Color32::from_rgb(9, 105, 218));
+
     assert_ne!(dark.accent_primary(), light.accent_primary());
     assert_ne!(dark.accent_secondary(), light.accent_secondary());
     assert_ne!(dark.accent_purple(), light.accent_purple());
@@ -56,6 +98,8 @@ fn theme_switching_visuals_and_card_frames() {
     assert_ne!(dark.error_banner_fill(), light.error_banner_fill());
     assert_ne!(dark.error_banner_stroke(), light.error_banner_stroke());
     assert_ne!(dark.error_banner_text(), light.error_banner_text());
+    assert_ne!(dark.nav_item_active_fill(), light.nav_item_active_fill());
+    assert_ne!(dark.nav_item_hover_fill(), light.nav_item_hover_fill());
 
     let dark_frame = dark.card_frame();
     let light_frame = light.card_frame();
@@ -63,7 +107,64 @@ fn theme_switching_visuals_and_card_frames() {
 }
 
 #[test]
-fn app_theme_toggle_and_ruvitube_setup_card() {
+fn headless_egui_renders_all_tabs_and_themes_without_panic() {
+    let mut app = RuviStudioApp::default();
+    let ctx = egui::Context::default();
+    configure_fonts(&ctx);
+
+    for theme in [StudioTheme::Dark, StudioTheme::Light] {
+        app.set_theme(theme);
+        for (idx, &tab) in ActiveTab::all().iter().enumerate() {
+            app.active_tab = tab;
+            app.busy = idx % 2 == 1;
+            app.error_banner = if idx == 0 {
+                Some("Test InfoBar warning banner".to_string())
+            } else {
+                None
+            };
+
+            let raw_input = egui::RawInput {
+                screen_rect: Some(egui::Rect::from_min_size(
+                    egui::Pos2::ZERO,
+                    egui::Vec2::new(1200.0, 760.0),
+                )),
+                ..Default::default()
+            };
+            let output = ctx.run(raw_input, |ctx| {
+                app.render_ui(ctx);
+            });
+            assert!(
+                !output.shapes.is_empty(),
+                "expected rendered egui shapes for tab {tab:?} in theme {theme:?}"
+            );
+        }
+    }
+}
+
+#[test]
+fn painter_vector_icons_draw_cleanly_for_all_tabs_and_states() {
+    let ctx = egui::Context::default();
+    let mut painted_shapes = 0usize;
+    let _ = ctx.run(egui::RawInput::default(), |ctx| {
+        egui::CentralPanel::default().show(ctx, |ui| {
+            let rect = egui::Rect::from_min_size(egui::Pos2::ZERO, egui::Vec2::splat(18.0));
+            for &tab in ActiveTab::all() {
+                icons::draw_tab_icon(ui.painter(), rect, tab, Color32::WHITE);
+            }
+            icons::draw_theme_icon(ui.painter(), rect, StudioTheme::Dark, Color32::WHITE);
+            icons::draw_theme_icon(ui.painter(), rect, StudioTheme::Light, Color32::YELLOW);
+            icons::draw_warning_icon(ui.painter(), rect, Color32::RED);
+            icons::draw_check_icon(ui.painter(), rect, Color32::GREEN);
+            icons::draw_cross_icon(ui.painter(), rect, Color32::RED);
+            icons::draw_status_dot(ui.painter(), rect.center(), 3.0, Color32::GREEN);
+            painted_shapes += 1;
+        });
+    });
+    assert_eq!(painted_shapes, 1);
+}
+
+#[test]
+fn app_theme_toggle_and_ruvitube_detection_and_jobs_state() {
     let mut app = RuviStudioApp::default();
     assert_eq!(app.current_theme, StudioTheme::Dark);
     assert_eq!(app.theme(), StudioTheme::Dark);
@@ -72,7 +173,15 @@ fn app_theme_toggle_and_ruvitube_setup_card() {
     assert_eq!(app.current_theme, StudioTheme::Light);
     assert_eq!(app.theme(), StudioTheme::Light);
 
+    app.jobs_count = 12;
+    assert_eq!(app.build_download_job().jobs, 12);
+
     assert!(!app.getube_dir.trim().is_empty());
+    assert!(
+        app.getube_dir.contains("ruvitube") || std::path::Path::new(&app.getube_dir).exists(),
+        "expected RuviTube directory to auto-detect ./ruvitube or ../ruvitube, got {}",
+        app.getube_dir
+    );
     app.check_getube_status();
     assert!(!app.getube_status.is_empty());
 

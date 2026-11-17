@@ -21,6 +21,17 @@
     .job.done .bar span { background: #2ecc71; }
     .job.failed .bar span { background: #e04b4b; }
     .empty { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
+    .setting-row {
+      display: flex; align-items: center; justify-content: space-between; gap: 10px;
+      border: 1px solid var(--line); border-radius: 8px; padding: 7px 10px;
+      margin-bottom: 10px; background: var(--panel); font-size: 12px;
+    }
+    .setting-row label { color: var(--text); }
+    .setting-row select {
+      background: #121212; color: var(--text); border: 1px solid var(--line);
+      border-radius: 6px; padding: 4px 8px; font: inherit; min-width: 84px;
+    }
+    .setting-row select:focus { outline: none; border-color: var(--accent); }
     .actions { display: flex; gap: 8px; }
     button {
       flex: 1; background: #2b2b2b; color: var(--text); border: 1px solid var(--line);
@@ -39,6 +50,16 @@
   <div class="body">
     <h2 data-i18n="popupLast">Son işler</h2>
     <div id="jobs"><div class="empty" data-i18n="popupIdle">Bekleyen indirme yok</div></div>
+    <div class="setting-row">
+      <label for="jobsSelect" data-i18n="popupJobs">Paralel Range Parçaları (--jobs)</label>
+      <select id="jobsSelect">
+        <option value="1">1</option>
+        <option value="2">2</option>
+        <option value="4">4</option>
+        <option value="8">8</option>
+        <option value="16">16</option>
+      </select>
+    </div>
     <div class="actions">
       <button id="options" data-i18n="popupSettings">Ayarlar</button>
       <button id="downloads" data-i18n="popupDownloads">İndirilenler</button>

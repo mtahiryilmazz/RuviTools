@@ -521,3 +521,90 @@ async fn jobs_1_probes_unknown_length_and_retains_metadata() {
 
     assert_eq!(std::fs::read(&out_file).unwrap(), payload);
 }
+
+#[tokio::test]
+async fn youtube_mock_jobs_scaling_produces_expected_chunks_total() {
+    let server = MockHttpServer::start().await;
+    // 128 KiB payload -> plan_chunks(131072, jobs) yields:
+    // jobs=1 -> 2 chunks, jobs=4 -> 8 chunks, jobs=8 -> 16 chunks, jobs=16 -> 32 chunks.
+    let payload: Vec<u8> = (0..(128 * 1024))
+        .map(|i| ((i * 17 + 3) % 251) as u8)
+        .collect();
+    server.set_route(
+        "/ytmedia/jobs_test.mp4",
+        RoutePayload::bytes(payload.clone(), "video/mp4"),
+    );
+
+    let html = format!(
+        r#"<!doctype html>
+<html>
+<head><title>YouTube Jobs Scaling</title></head>
+<body>
+<script>
+var ytInitialPlayerResponse = {{
+  "playabilityStatus": {{ "status": "OK" }},
+  "videoDetails": {{
+    "videoId": "JOBSSCALE1",
+    "title": "YouTube Jobs Scaling Fixture"
+  }},
+  "streamingData": {{
+    "formats": [
+      {{
+        "itag": 22,
+        "url": "{base}/ytmedia/jobs_test.mp4",
+        "mimeType": "video/mp4; codecs=\"avc1.64001F, mp4a.40.2\"",
+        "width": 1280,
+        "height": 720,
+        "bitrate": 1500000,
+        "fps": 30,
+        "contentLength": "{len}"
+      }}
+    ]
+  }}
+}};
+</script>
+</body>
+</html>"#,
+        base = server.base_url,
+        len = payload.len()
+    );
+    server.set_route("/watch", RoutePayload::text(&html, "text/html"));
+    let watch_url = format!("{}/watch?v=JOBSSCALE1", server.base_url);
+
+    let tmp = tempfile::tempdir().unwrap();
+    for (jobs, expected_chunks) in [(1usize, 2usize), (4, 8), (8, 16), (16, 32)] {
+        let out_file = tmp.path().join(format!("yt_jobs_{jobs}.mp4"));
+        let out = common::ruvid_cmd(tmp.path())
+            .args([
+                "get",
+                &watch_url,
+                "--jobs",
+                &jobs.to_string(),
+                "-f",
+                "720p",
+                "-o",
+                out_file.to_str().unwrap(),
+                "--overwrite",
+                "--json",
+            ])
+            .assert()
+            .success()
+            .get_output()
+            .stdout
+            .clone();
+
+        let json_val: serde_json::Value =
+            serde_json::from_slice(&out).expect("valid JSON output from ruvid get");
+        assert_eq!(json_val["ok"], serde_json::json!(true));
+        assert_eq!(
+            json_val["chunks_total"],
+            serde_json::json!(expected_chunks),
+            "jobs={jobs} should plan {expected_chunks} chunks, got: {json_val}"
+        );
+        assert_eq!(
+            json_val["bytes_downloaded"],
+            serde_json::json!(payload.len() as u64)
+        );
+        assert_eq!(std::fs::read(&out_file).unwrap(), payload);
+    }
+}

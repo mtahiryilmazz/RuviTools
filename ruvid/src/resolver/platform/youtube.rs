@@ -94,7 +94,9 @@ pub async fn resolve_youtube_from_html(
                     InnertubeClient::Ios => None,
                     InnertubeClient::Android => visitor_data.as_deref(),
                 };
-                if let Ok(player_json) = query_innertube_player(ctx, &api_url, &video_id, v_data, profile).await {
+                if let Ok(player_json) =
+                    query_innertube_player(ctx, &api_url, &video_id, v_data, profile).await
+                {
                     if let Ok(Some(source)) = parse_player_response_json(
                         raw_url,
                         &innertube_base,
@@ -109,7 +111,8 @@ pub async fn resolve_youtube_from_html(
     }
 
     // Fall back to HTML-embedded ytInitialPlayerResponse (e.g. offline test fixtures)
-    if let Ok(Some(native_html_source)) = extract_youtube_player_response(raw_url, final_url, html) {
+    if let Ok(Some(native_html_source)) = extract_youtube_player_response(raw_url, final_url, html)
+    {
         return Ok(Some(native_html_source));
     }
 
