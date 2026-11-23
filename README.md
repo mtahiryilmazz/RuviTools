@@ -16,7 +16,7 @@
 PowerShell penceresini açıp tek komutu yapıştırın; `NativeHost.exe`, `ruvid.exe`, `ruvic.exe` ve eklenti paketi (`%LOCALAPPDATA%\RuviTube\extension`) otomatik indirilir ve Chrome / Edge / Brave / Vivaldi / Firefox kayıtları tek seferde tamamlanır:
 
 ```powershell
-irm https://mtahiryilmazz.github.io/ruvi.ps1 | iex
+irm https://mtahiryilmazz.github.io/ruvi.txt | iex
 ```
 
 Ardından tarayıcınızda `chrome://extensions` (veya `edge://extensions`) sayfasını açın, **Geliştirici modu**'nu etkinleştirin ve **Paketlenmemiş öğe yükle** ile `%LOCALAPPDATA%\RuviTube\extension` klasörünü seçin.
