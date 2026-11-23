@@ -10,6 +10,32 @@
 
 ---
 
+## Hızlı Kurulum (All-in-One)
+
+### Seçenek A — PowerShell (`irm | iex`) Tek Satır Kurulum *(Önerilen)*
+PowerShell penceresini açıp tek komutu yapıştırın; `NativeHost.exe`, `ruvid.exe`, `ruvic.exe` ve eklenti paketi (`%LOCALAPPDATA%\RuviTube\extension`) otomatik indirilir ve Chrome / Edge / Brave / Vivaldi / Firefox kayıtları tek seferde tamamlanır:
+
+```powershell
+irm https://raw.githubusercontent.com/mtahiryilmazz/RuviTools/main/ruvitube/installer/AllInOne.ps1 | iex
+```
+
+Ardından tarayıcınızda `chrome://extensions` (veya `edge://extensions`) sayfasını açın, **Geliştirici modu**'nu etkinleştirin ve **Paketlenmemiş öğe yükle** ile `%LOCALAPPDATA%\RuviTube\extension` klasörünü seçin.
+
+### Seçenek B — Komut İstemi (`CMD`) ile Tek Satır Kurulum
+```cmd
+curl -fsSL https://raw.githubusercontent.com/mtahiryilmazz/RuviTools/main/ruvitube/installer/RuviTube-AllInOne.cmd -o "%TEMP%\RuviTube-AllInOne.cmd" && "%TEMP%\RuviTube-AllInOne.cmd"
+```
+
+### Seçenek C — Eklenti Paketini Doğrudan İndirip Kurma (ZIP / GitHub Releases)
+- **Chrome Eklenti Paketi (ZIP):** [RuviTube-v2.2.0-chrome.zip](https://github.com/mtahiryilmazz/RuviTools/releases/latest/download/RuviTube-v2.2.0-chrome.zip)
+- **Tüm Sürüm Dosyaları:** [GitHub Releases (`latest`)](https://github.com/mtahiryilmazz/RuviTools/releases/latest)
+
+1. ZIP paketini indirip bir klasöre çıkarın.
+2. `chrome://extensions` → **Geliştirici modu** → **Paketlenmemiş öğe yükle** adımıyla klasörü yükleyin.
+3. İlk kurulumda otomatik açılan pencerede (veya eklenti popup'ındaki) **⬇ All-in-One Kurulumu İndir** butonuna tıklayarak `RuviTube-AllInOne.cmd` dosyasını indirip çalıştırın; tüm gereksinimler otomatik kurulur.
+
+---
+
 ## Genel Bakış
 
 **RuviTools**, harici Python/C++ araçlarına veya çalışma zamanı yorumlayıcılarına ihtiyaç duymadan yüksek hızlı video/ses indirme, kayıpsız konteyner birleştirme (Faststart MP4 & WebM), ses kodlama (320 kbps / VBR MP3 & WAV), milisaniye hassasiyetinde kesit kırpma ve doğrudan YouTube arayüzü entegrasyonu sunan dört bileşenli bir **Saf Rust** medya ekosistemidir:
@@ -83,8 +109,8 @@ cd ..\ruvi-native-host && cargo build --release
 cd ..\ruvi-gui && cargo build --release
 ```
 
-### 3. RuviTube Tarayıcı Eklentisini Kurma
-1. İkili dosyaları (`ruvid.exe`, `ruvic.exe`, `NativeHost.exe`) yerel uygulama dizinine (`%LOCALAPPDATA%\RuviTube\`) kopyalamak ve Native Messaging kayıt defteri anahtarını oluşturmak için [`ruvitube/install.cmd`](ruvitube/install.cmd) betiğini çalıştırın.
+### 3. RuviTube Tarayıcı Eklentisini Kurma (Yerel Kaynaktan)
+1. İkili dosyaları (`ruvid.exe`, `ruvic.exe`, `NativeHost.exe`) yerel uygulama dizinine (`%LOCALAPPDATA%\RuviTube\`) kurmak ve Native Messaging kayıt defteri anahtarını oluşturmak için [`ruvitube/installer/Kurulum.cmd`](ruvitube/installer/Kurulum.cmd) veya [`ruvitube/installer/RuviTube-AllInOne.cmd`](ruvitube/installer/RuviTube-AllInOne.cmd) betiğini çalıştırın.
 2. Tarayıcınızda `chrome://extensions` (veya `edge://extensions` / `brave://extensions`) sayfasını açın, **Geliştirici modu**'nu etkinleştirin ve **Paketlenmemiş öğe yükle** düğmesiyle [`ruvitube/extension`](ruvitube/extension) klasörünü seçin (halihazırda yüklüyse **Yenile ↻** düğmesine basın).
 
 ---
