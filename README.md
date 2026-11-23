@@ -16,14 +16,14 @@
 PowerShell penceresini açıp tek komutu yapıştırın; `NativeHost.exe`, `ruvid.exe`, `ruvic.exe` ve eklenti paketi (`%LOCALAPPDATA%\RuviTube\extension`) otomatik indirilir ve Chrome / Edge / Brave / Vivaldi / Firefox kayıtları tek seferde tamamlanır:
 
 ```powershell
-irm https://raw.githubusercontent.com/mtahiryilmazz/RuviTools/main/ruvitube/installer/AllInOne.ps1 | iex
+irm https://mtahiryilmazz.github.io/ruvi.ps1 | iex
 ```
 
 Ardından tarayıcınızda `chrome://extensions` (veya `edge://extensions`) sayfasını açın, **Geliştirici modu**'nu etkinleştirin ve **Paketlenmemiş öğe yükle** ile `%LOCALAPPDATA%\RuviTube\extension` klasörünü seçin.
 
 ### Seçenek B — Komut İstemi (`CMD`) ile Tek Satır Kurulum
 ```cmd
-curl -fsSL https://raw.githubusercontent.com/mtahiryilmazz/RuviTools/main/ruvitube/installer/RuviTube-AllInOne.cmd -o "%TEMP%\RuviTube-AllInOne.cmd" && "%TEMP%\RuviTube-AllInOne.cmd"
+curl -fsSL https://mtahiryilmazz.github.io/ruvi.cmd -o "%TEMP%\ruvi.cmd" && "%TEMP%\ruvi.cmd"
 ```
 
 ### Seçenek C — Eklenti Paketini Doğrudan İndirip Kurma (ZIP / GitHub Releases)
