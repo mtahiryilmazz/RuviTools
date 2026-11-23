@@ -4,7 +4,7 @@
 const TR = {
   popupLast: 'Son işler',
   popupIdle: 'Bekleyen indirme yok',
-  popupJobs: 'Paralel Range Parçaları (--jobs)',
+  popupJobs: 'İndirme Hızı (Paralel)',
   popupSettings: 'Ayarlar',
   popupFolder: 'Klasörü Aç',
   popupOpenYoutube: "YouTube'da videonun sağ üstündeki RuviTube menüsünden kalite veya MP3 seçin",

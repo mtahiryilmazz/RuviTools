@@ -65,6 +65,8 @@ struct IncomingMessage {
     channel: String,
     #[serde(default)]
     title: String,
+    #[serde(default, rename = "audioLang")]
+    audio_lang: String,
 }
 
 #[derive(Debug, Clone)]
@@ -645,7 +647,7 @@ async fn handle_download_job_with_config<W: Write + Send + 'static>(
             "jobId": job_id,
             "percent": 10,
             "jobs": jobs,
-            "status": format!("ruvid saf Rust motoru bağlanıyor (--jobs {jobs})...")
+            "status": format!("ruvid saf Rust motoru bağlanıyor (Hız x{jobs})...")
         }),
     );
 
@@ -714,7 +716,14 @@ async fn handle_download_job_with_config<W: Write + Send + 'static>(
         subtitles_lang: None,
         sub_format: "vtt".to_string(),
         auto_subs: false,
-        audio_lang: None,
+        audio_lang: {
+            let trimmed = msg.audio_lang.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(trimmed.to_string())
+            }
+        },
         split_chapters: false,
         clip: None,
         start_time: None,
@@ -1622,6 +1631,7 @@ var ytInitialPlayerResponse = {{
             clip: None,
             channel: String::new(),
             title: String::new(),
+            audio_lang: String::new(),
         };
 
         let out_buf = Arc::new(Mutex::new(Vec::<u8>::new()));
@@ -1640,8 +1650,8 @@ var ytInitialPlayerResponse = {{
             frames[0]["status"]
                 .as_str()
                 .unwrap_or("")
-                .contains("--jobs 8"),
-            "expected status to contain --jobs 8, got: {}",
+                .contains("Hız x8"),
+            "expected status to contain Hız x8, got: {}",
             frames[0]["status"]
         );
 

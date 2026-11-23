@@ -726,27 +726,75 @@ pub fn extract_balanced_json_from_slice(slice: &str) -> Option<String> {
     None
 }
 
-fn extract_audio_language(fmt: &Value) -> Option<String> {
-    if let Some(id) = fmt.pointer("/audioTrack/id").and_then(Value::as_str) {
-        let lang = id.split('.').next().unwrap_or(id).trim();
-        if !lang.is_empty() {
-            return Some(lang.to_string());
-        }
+fn is_dubbed_audio_track(fmt: &Value) -> bool {
+    if fmt
+        .pointer("/audioTrack/isAutoDubbed")
+        .and_then(Value::as_bool)
+        == Some(true)
+    {
+        return true;
     }
-    if let Some(code) = fmt.get("languageCode").and_then(Value::as_str) {
-        let lang = code.trim();
-        if !lang.is_empty() {
-            return Some(lang.to_string());
+    if let Some(id) = fmt.pointer("/audioTrack/id").and_then(Value::as_str) {
+        let lower = id.to_ascii_lowercase();
+        if lower.ends_with(".3") || lower.contains("dub") {
+            return true;
         }
     }
     if let Some(display) = fmt
         .pointer("/audioTrack/displayName")
         .and_then(Value::as_str)
     {
-        let lang = display.split_whitespace().next().unwrap_or(display).trim();
-        if !lang.is_empty() {
-            return Some(lang.to_ascii_lowercase());
+        let lower = display.to_ascii_lowercase();
+        if lower.contains("dubbed") || lower.contains("dublaj") || lower.contains("auto-dub") {
+            return true;
         }
+    }
+    false
+}
+
+fn is_original_audio_track(fmt: &Value) -> bool {
+    if let Some(display) = fmt
+        .pointer("/audioTrack/displayName")
+        .and_then(Value::as_str)
+    {
+        let lower = display.to_ascii_lowercase();
+        if lower.contains("original") || lower.contains("orijinal") {
+            return true;
+        }
+    }
+    if let Some(id) = fmt.pointer("/audioTrack/id").and_then(Value::as_str)
+        && id.ends_with(".4")
+    {
+        return true;
+    }
+    false
+}
+
+fn extract_audio_language(fmt: &Value) -> Option<String> {
+    let base_lang = if let Some(id) = fmt.pointer("/audioTrack/id").and_then(Value::as_str) {
+        let lang = id.split('.').next().unwrap_or(id).trim();
+        (!lang.is_empty()).then(|| lang.to_string())
+    } else if let Some(code) = fmt.get("languageCode").and_then(Value::as_str) {
+        let lang = code.trim();
+        (!lang.is_empty()).then(|| lang.to_string())
+    } else if let Some(display) = fmt
+        .pointer("/audioTrack/displayName")
+        .and_then(Value::as_str)
+    {
+        let lang = display.split_whitespace().next().unwrap_or(display).trim();
+        (!lang.is_empty()).then(|| lang.to_ascii_lowercase())
+    } else {
+        None
+    };
+
+    if let Some(lang) = base_lang {
+        if is_original_audio_track(fmt) {
+            return Some(format!("{lang}-orig"));
+        }
+        if is_dubbed_audio_track(fmt) {
+            return Some(format!("{lang}-dub"));
+        }
+        return Some(lang);
     }
     None
 }

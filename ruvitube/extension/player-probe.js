@@ -195,6 +195,19 @@
         chapters = parseChaptersFromDescription(shortDescription);
       }
 
+      let activeAudioLang = '';
+      try {
+        if (player && typeof player.getAudioTrack === 'function') {
+          const at = player.getAudioTrack();
+          if (at && typeof at === 'object') {
+            const rawId = String(at.id || (at.audioTrack && at.audioTrack.id) || at.languageCode || '').trim();
+            if (rawId) {
+              activeAudioLang = rawId.split('.')[0].trim();
+            }
+          }
+        }
+      } catch (_) {}
+
       return {
         id: finalId,
         title,
@@ -203,6 +216,7 @@
         isLive,
         thumbnail,
         description: shortDescription,
+        activeAudioLang,
         formats,
         chapters
       };

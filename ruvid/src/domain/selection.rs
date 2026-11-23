@@ -34,6 +34,35 @@ fn split_container(spec: &str) -> (&str, Option<&str>) {
     }
 }
 
+fn audio_origin_priority(a: &MediaStream) -> u32 {
+    let Some(lang) = a.language.as_deref() else {
+        return 2;
+    };
+    let lower = lang.to_ascii_lowercase();
+    if lower.ends_with("-orig") {
+        3
+    } else if lower.ends_with("-dub") {
+        0
+    } else {
+        2
+    }
+}
+
+fn lang_matches(stream_lang: &str, requested: &str) -> bool {
+    let s = stream_lang
+        .trim()
+        .trim_end_matches("-orig")
+        .trim_end_matches("-dub");
+    let r = requested.trim();
+    if r.is_empty() {
+        return false;
+    }
+    s.eq_ignore_ascii_case(r)
+        || s.to_ascii_lowercase()
+            .starts_with(&format!("{}-", r.to_ascii_lowercase()))
+        || s.to_ascii_lowercase().starts_with(&r.to_ascii_lowercase())
+}
+
 pub fn select_stream_with_lang<'a>(
     streams: &'a [MediaStream],
     spec: &str,
@@ -51,15 +80,13 @@ pub fn select_stream_with_lang<'a>(
             .iter()
             .filter(|s| {
                 (s.kind == StreamKind::Audio || s.kind == StreamKind::VideoAudio)
-                    && s.language
-                        .as_deref()
-                        .is_some_and(|l| l.eq_ignore_ascii_case(lang) || l.starts_with(lang))
+                    && s.language.as_deref().is_some_and(|l| lang_matches(l, lang))
             })
             .collect();
         if !lang_audio.is_empty() {
             return lang_audio
                 .into_iter()
-                .max_by_key(|s| s.bandwidth_bps.unwrap_or(0))
+                .max_by_key(|s| (audio_origin_priority(s), s.bandwidth_bps.unwrap_or(0)))
                 .ok_or_else(|| RuviError::Unsupported("no stream available".to_string()));
         }
     }
@@ -101,25 +128,25 @@ pub fn select_stream_with_lang<'a>(
                             .as_deref()
                             .is_some_and(|c| c.to_ascii_lowercase().contains("opus"))
                 })
-                .max_by_key(|s| s.bandwidth_bps.unwrap_or(0))
+                .max_by_key(|s| (audio_origin_priority(s), s.bandwidth_bps.unwrap_or(0)))
             {
                 return Ok(best_opus);
             }
         }
-        // Prefer m4a / mp4a / AAC audio streams first for optimal compatibility and direct playback, then highest bandwidth
+        // Prefer original (non-dubbed) m4a / mp4a / AAC audio streams first, then highest bandwidth
         if let Some(best_m4a) = audio_pool
             .iter()
             .copied()
             .filter(|s| {
                 s.container.eq_ignore_ascii_case("m4a") || s.container.eq_ignore_ascii_case("mp4")
             })
-            .max_by_key(|s| s.bandwidth_bps.unwrap_or(0))
+            .max_by_key(|s| (audio_origin_priority(s), s.bandwidth_bps.unwrap_or(0)))
         {
             return Ok(best_m4a);
         }
         return audio_pool
             .into_iter()
-            .max_by_key(|s| s.bandwidth_bps.unwrap_or(0))
+            .max_by_key(|s| (audio_origin_priority(s), s.bandwidth_bps.unwrap_or(0)))
             .ok_or_else(|| RuviError::Unsupported("no audio stream available".to_string()));
     }
 
@@ -391,11 +418,7 @@ fn find_best_audio_with_lang<'a>(
         let matched: Vec<&MediaStream> = all_audio
             .iter()
             .copied()
-            .filter(|a| {
-                a.language
-                    .as_deref()
-                    .is_some_and(|l| l.eq_ignore_ascii_case(lang) || l.starts_with(lang))
-            })
+            .filter(|a| a.language.as_deref().is_some_and(|l| lang_matches(l, lang)))
             .collect();
         if matched.is_empty() {
             all_audio
@@ -434,12 +457,22 @@ fn find_best_audio_with_lang<'a>(
                         .is_some_and(|c| c.to_ascii_lowercase().contains("mp4a"))
             }
         })
-        .max_by_key(|a| (is_non_drc(a), a.bandwidth_bps.unwrap_or(0)));
+        .max_by_key(|a| {
+            (
+                audio_origin_priority(a),
+                is_non_drc(a),
+                a.bandwidth_bps.unwrap_or(0),
+            )
+        });
 
     compatible_audio.or_else(|| {
-        audio_pool
-            .into_iter()
-            .max_by_key(|a| (is_non_drc(a), a.bandwidth_bps.unwrap_or(0)))
+        audio_pool.into_iter().max_by_key(|a| {
+            (
+                audio_origin_priority(a),
+                is_non_drc(a),
+                a.bandwidth_bps.unwrap_or(0),
+            )
+        })
     })
 }
 

@@ -55,11 +55,11 @@
     'wav': 'WAV · Kayıpsız PCM'
   };
   const JOBS_LABELS = {
-    '1': '1 parça (--jobs 1)',
-    '2': '2 parça (--jobs 2)',
-    '4': '4 parça (--jobs 4)',
-    '8': '8 parça (--jobs 8)',
-    '16': '16 parça (--jobs 16)'
+    '1': 'x1 · Normal',
+    '2': 'x2 · Hızlı',
+    '4': 'x4 · Paralel',
+    '8': 'x8 · Turbo',
+    '16': 'x16 · Ultra'
   };
   const CHIPS = [15, 30, 60, 180, 300, 600];
 
@@ -83,7 +83,7 @@
     clipClose: 'Kapat',
     clipDownloadVideo: 'Video indir',
     clipDownloadAudio: 'Ses / MP3 indir',
-    clipJobs: 'Paralel (--jobs)',
+    clipJobs: 'İndirme Hızı',
     clipFull: 'Tam videoyu indir',
     clipPlaceholder: '1:23 veya 01:23:45',
     clipChapters: 'Bölümler',
@@ -287,6 +287,9 @@
     if (!isWatchLikePage()) return;
     const url = currentVideoUrl();
     if (!forceNative && state.probe.url === url && state.probe.data && state.probe.data.formats.length) {
+      requestMainProbe().then(d => {
+        if (d && typeof d.activeAudioLang === 'string') state.probe.data.activeAudioLang = d.activeAudioLang;
+      });
       if (state.pill) state.pill.renderMenu();
       return;
     }
@@ -921,9 +924,9 @@
 
     const clipOpenBtn = el('button', { class: 'foot-btn', type: 'button' }, '✂ Kesit & Bölümler');
     const folderBtn = el('button', { class: 'foot-btn', type: 'button' }, 'Klasör');
-    const jobsSel = el('select', { title: 'Paralel Range Parçaları (--jobs)' });
+    const jobsSel = el('select', { title: 'Paralel İndirme Hızı' });
     for (const j of VALID_JOBS) {
-      jobsSel.appendChild(el('option', { value: String(j) }, `--jobs ${j}`));
+      jobsSel.appendChild(el('option', { value: String(j) }, `Hız x${j}`));
     }
     const footEl = el('div', { class: 'foot' }, clipOpenBtn, jobsSel, folderBtn);
 
@@ -1821,7 +1824,9 @@
     const url = currentVideoUrl();
     const channel = String((state.probe.data && state.probe.data.channel) || '').trim();
     const title = currentTitle();
+    const audioLang = String((state.probe.data && state.probe.data.activeAudioLang) || '').trim();
     const payload = { action: 'download', type, quality, url, jobs, channel, title };
+    if (audioLang) payload.audioLang = audioLang;
     if (clip) {
       payload.clip = { startSec: clip.startSec, endSec: clip.endSec };
       if (clip.chapterTitle) payload.clip.chapterTitle = clip.chapterTitle;

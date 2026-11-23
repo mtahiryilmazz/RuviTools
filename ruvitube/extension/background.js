@@ -318,7 +318,8 @@ async function startNativeJob(job) {
       jobs,
       clip: job.clip || null,
       channel: job.channel || '',
-      title: job.title || ''
+      title: job.title || '',
+      audioLang: job.audioLang || ''
     });
   } catch (e) {
     await finishJob(job.jobId, {
@@ -550,6 +551,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   const clip = normalizeClip(message.clip);
   const channel = typeof message.channel === 'string' ? message.channel.trim().slice(0, 120) : '';
   const title = typeof message.title === 'string' ? message.title.trim().slice(0, 200) : '';
+  const audioLang = typeof message.audioLang === 'string' ? message.audioLang.trim().slice(0, 24) : '';
 
   if (!isYoutubeUrl(url)) {
     sendResponse({ ok: false, error: 'Geçerli bir YouTube video adresi bulunamadı.' });
@@ -580,6 +582,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       clip,
       channel,
       title,
+      audioLang,
       label: message.label ? String(message.label).slice(0, 80) : labelFor(type, quality, clip),
       state: 'queued',
       percent: 0,
