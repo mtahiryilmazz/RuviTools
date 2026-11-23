@@ -33,7 +33,7 @@ const DEFAULTS = {
   jobs: 4,
   rememberClip: true,
   showStatus: true,
-  showFloatingPill: true
+  showFloatingPill: false
 };
 
 const VALID_JOBS = [1, 2, 4, 8, 16];
@@ -103,8 +103,57 @@ async function load() {
   render(merged);
 }
 
+async function checkHostStatus() {
+  const banner = $('setupBanner');
+  const statusEl = $('setupStatus');
+  if (!banner) return;
+  try {
+    const res = await chrome.runtime.sendMessage({ action: 'check_native_host' });
+    const ok = Boolean(res && res.ok);
+    banner.hidden = ok;
+    if (!ok && statusEl) {
+      statusEl.textContent = (res && res.error) ? res.error : '';
+    }
+  } catch (_) {
+    banner.hidden = false;
+  }
+}
+
+if ($('btnInstallHost')) {
+  $('btnInstallHost').addEventListener('click', async () => {
+    const btn = $('btnInstallHost');
+    const statusEl = $('setupStatus');
+    btn.disabled = true;
+    try {
+      const res = await chrome.runtime.sendMessage({ action: 'download_all_in_one' });
+      if (res && res.ok) {
+        btn.textContent = '✓ İndirildi — dosyayı açın';
+        if (statusEl) statusEl.textContent = 'İndirilenler klasöründen RuviTube-AllInOne.cmd dosyasını çalıştırıp ardından Yenile butonuna basın.';
+      } else {
+        btn.textContent = 'Hata — tekrar deneyin';
+        if (statusEl && res && res.error) statusEl.textContent = res.error;
+      }
+    } catch (_) {
+      btn.textContent = 'Hata — tekrar deneyin';
+    }
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.textContent = '⬇ All-in-One Kurulumu İndir';
+    }, 4000);
+  });
+}
+
+if ($('btnRecheckHost')) {
+  $('btnRecheckHost').addEventListener('click', () => {
+    const statusEl = $('setupStatus');
+    if (statusEl) statusEl.textContent = 'Kontrol ediliyor...';
+    checkHostStatus();
+  });
+}
+
 applyI18n();
 load();
+checkHostStatus();
 
 CHECKS.concat(SELECTS, ['jobs', 'clipLength']).forEach(id => {
   $(id).addEventListener('change', scheduleSave);

@@ -64,6 +64,15 @@
       background: rgba(255, 82, 24, 0.22); color: #ffd2b8;
     }
     .q-btn.audio .q-tag { background: rgba(63, 185, 80, 0.22); color: #aff5b4; }
+    .setup-card {
+      border: 1px solid rgba(255, 82, 24, 0.55); border-radius: 10px; padding: 10px;
+      margin-bottom: 10px; background: rgba(255, 77, 26, 0.10);
+    }
+    .setup-card h2 { color: #ffd2b8; margin-bottom: 4px; }
+    .setup-card p { margin: 0 0 8px; font-size: 11.5px; color: var(--text); }
+    .setup-actions { display: flex; gap: 6px; }
+    .setup-primary { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; flex: 2; }
+    .setup-primary:hover { background: #e03e10; }
   </style>
 </head>
 <body>
@@ -73,6 +82,14 @@
     <span id="version"></span>
   </header>
   <div class="body">
+    <div id="setupBanner" class="setup-card" hidden>
+      <h2>RuviTube Motoru Kurulmamış</h2>
+      <p>Tek tıkla All-in-One kurulum dosyasını indirip çalıştırın; tüm gereksinimler otomatik kurulur.</p>
+      <div class="setup-actions">
+        <button type="button" id="btnInstallHost" class="setup-primary">⬇ All-in-One Kurulumu İndir</button>
+        <button type="button" id="btnRecheckHost">Yenile</button>
+      </div>
+    </div>
     <div id="activeMedia" class="media-card" hidden>
       <h2>Aktif YouTube Videosu — Hızlı İndir</h2>
       <div id="activeTitle" class="media-title"></div>

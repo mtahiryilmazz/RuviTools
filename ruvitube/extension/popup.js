@@ -135,7 +135,42 @@ chrome.storage.onChanged.addListener((changes, area) => {
   $('jobsSelect').value = String(VALID_JOBS.includes(j) ? j : 4);
 });
 
+async function checkHostStatus() {
+  const banner = $('setupBanner');
+  if (!banner) return;
+  try {
+    const res = await chrome.runtime.sendMessage({ action: 'check_native_host' });
+    banner.hidden = Boolean(res && res.ok);
+  } catch (_) {
+    banner.hidden = false;
+  }
+}
+
+if ($('btnInstallHost')) {
+  $('btnInstallHost').addEventListener('click', async () => {
+    const btn = $('btnInstallHost');
+    btn.disabled = true;
+    try {
+      const res = await chrome.runtime.sendMessage({ action: 'download_all_in_one' });
+      btn.textContent = res && res.ok ? '✓ İndirildi — dosyayı açın' : 'Hata — tekrar deneyin';
+    } catch (_) {
+      btn.textContent = 'Hata — tekrar deneyin';
+    }
+    setTimeout(() => {
+      btn.disabled = false;
+      btn.textContent = '⬇ All-in-One Kurulumu İndir';
+    }, 4000);
+  });
+}
+
+if ($('btnRecheckHost')) {
+  $('btnRecheckHost').addEventListener('click', () => {
+    checkHostStatus();
+  });
+}
+
 applyI18n();
+checkHostStatus();
 loadJobs();
 loadJobsSetting();
 initActiveMediaCard();

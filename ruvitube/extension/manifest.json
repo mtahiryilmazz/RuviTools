@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "RuviTube",
-  "version": "2.1.0",
-  "description": "RuviTube v2.1 (RuviTools Saf Rust Motoru): YouTube videolarını 4K/8K, otomatik MP3 (320k/192k/VBR) ve kesit halinde yüksek hızla indir.",
+  "version": "2.2.0",
+  "description": "RuviTube v2.2 (RuviTools Saf Rust Motoru): YouTube videolarını 4K/8K, otomatik MP3 (320k/192k/VBR) ve kesit halinde yüksek hızla indir.",
   "default_locale": "tr",
   "minimum_chrome_version": "116",
   "permissions": [

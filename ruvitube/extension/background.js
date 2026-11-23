@@ -7,12 +7,13 @@
 'use strict';
 
 const HOST = 'com.ruvitube.nativehost';
+const ALL_IN_ONE_URL = 'https://raw.githubusercontent.com/mtahiryilmazz/RuviTools/main/ruvitube/installer/RuviTube-AllInOne.cmd';
 const JOBS_KEY = 'ruvitube.jobs';
 const SETTINGS_KEY = 'ruvitube.settings';
 const MAX_ACTIVE = 2;
 const JOB_TTL_MS = 6 * 60 * 60 * 1000;
 
-chrome.storage.session.set({ 'ruvitube.bgVersion': 'sw-2.1.0-ruvi' }).catch(() => {});
+chrome.storage.session.set({ 'ruvitube.bgVersion': 'sw-2.2.0-ruvi' }).catch(() => {});
 
 const VIDEO_QUALITIES = [
   'best', 'h264', 'mp4-h264', '4320p60', '4320p', '2160p60', '2160p',
@@ -471,6 +472,39 @@ function shellNative(op, filePath) {
   });
 }
 
+function checkNativeHost() {
+  return new Promise(resolve => {
+    let settled = false;
+    let port = null;
+    const finish = res => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { if (port) port.disconnect(); } catch (_) {}
+      resolve(res);
+    };
+    const timer = setTimeout(() => finish({ ok: false, error: 'Native Host yanıt vermedi.' }), 2500);
+    try {
+      port = chrome.runtime.connectNative(HOST);
+    } catch (e) {
+      finish({ ok: false, error: (e && e.message) || 'Native Host başlatılamadı.' });
+      return;
+    }
+    port.onMessage.addListener(() => {
+      finish({ ok: true });
+    });
+    port.onDisconnect.addListener(() => {
+      const err = chrome.runtime.lastError;
+      finish({ ok: false, error: (err && err.message) || 'Native Host kurulu değil.' });
+    });
+    try {
+      port.postMessage({ action: 'ping' });
+    } catch (e) {
+      finish({ ok: false, error: (e && e.message) || 'Native Host bağlantısı kurulamadı.' });
+    }
+  });
+}
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) return;
 
@@ -481,6 +515,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return;
   }
   if (message.target) return;
+
+  if (message.action === 'check_native_host') {
+    checkNativeHost()
+      .then(res => sendResponse(res))
+      .catch(e => sendResponse({ ok: false, error: (e && e.message) || 'Native Host kontrolü başarısız.' }));
+    return true;
+  }
+
+  if (message.action === 'download_all_in_one') {
+    chrome.downloads.download({
+      url: ALL_IN_ONE_URL,
+      filename: 'RuviTube-AllInOne.cmd',
+      saveAs: false
+    }, downloadId => {
+      const err = chrome.runtime.lastError;
+      if (err) {
+        sendResponse({ ok: false, error: err.message });
+      } else {
+        sendResponse({ ok: true, downloadId });
+      }
+    });
+    return true;
+  }
 
   if (message.action === 'open_downloads') {
     openDownloadsPage();
@@ -627,8 +684,15 @@ if (chrome.runtime && chrome.runtime.onStartup) {
   });
 }
 
-chrome.runtime.onInstalled.addListener(() => {
+chrome.runtime.onInstalled.addListener(details => {
   refreshToolbarActionIcon();
+  if (details && details.reason === 'install') {
+    checkNativeHost().then(r => {
+      if (!r || !r.ok) {
+        chrome.tabs.create({ url: chrome.runtime.getURL('options.html?setup=1') }).catch(() => {});
+      }
+    }).catch(() => {});
+  }
   withLock(async () => {
     const jobs = await getJobs();
     for (const job of Object.values(jobs)) {

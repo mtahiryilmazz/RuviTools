@@ -491,8 +491,8 @@
       {
         type: 'MP3',
         quality: '320kbps',
-        badge: 'MP3',
-        tier: 'audio',
+        badge: '320k',
+        tier: 'audio-hi',
         title: 'MP3 · 320 kbps (En Yüksek)',
         sub: 'Saf Rust Symphonia + rusty_mp3',
         sizeText: estKbps(320)
@@ -500,8 +500,8 @@
       {
         type: 'MP3',
         quality: '256kbps',
-        badge: 'MP3',
-        tier: 'audio',
+        badge: '256k',
+        tier: 'audio-mid',
         title: 'MP3 · 256 kbps (Yüksek)',
         sub: 'Saf Rust Symphonia + rusty_mp3',
         sizeText: estKbps(256)
@@ -509,8 +509,8 @@
       {
         type: 'MP3',
         quality: '192kbps',
-        badge: 'MP3',
-        tier: 'audio',
+        badge: '192k',
+        tier: 'audio-mid',
         title: 'MP3 · 192 kbps (Standart)',
         sub: 'Dengeli boyut ve yüksek kalite',
         sizeText: estKbps(192)
@@ -518,7 +518,7 @@
       {
         type: 'MP3',
         quality: '128kbps',
-        badge: 'MP3',
+        badge: '128k',
         tier: 'audio',
         title: 'MP3 · 128 kbps (Kompakt)',
         sub: 'Küçük dosya boyutu',
@@ -527,8 +527,8 @@
       {
         type: 'MP3',
         quality: 'vbr',
-        badge: 'MP3',
-        tier: 'audio',
+        badge: 'VBR',
+        tier: 'audio-mid',
         title: 'MP3 · VBR (Değişken Bit Hızı)',
         sub: 'Akıllı psikoakustik V2 profili',
         sizeText: estKbps(190)
@@ -537,7 +537,7 @@
         type: 'M4A',
         quality: 'original',
         badge: 'M4A',
-        tier: 'audio',
+        tier: 'audio-hi',
         title: 'M4A · Orijinal Ses (AAC)',
         sub: 'Kayıpsız konteyner aktarımlı AAC',
         sizeText: m4aSize
@@ -546,7 +546,7 @@
         type: 'OPUS',
         quality: 'original',
         badge: 'OPUS',
-        tier: 'audio',
+        tier: 'audio-hi',
         title: 'Opus · Orijinal Ses (WebM)',
         sub: 'Yeniden kodlamasız orijinal akış',
         sizeText: opusSize
@@ -555,7 +555,7 @@
         type: 'WAV',
         quality: 'original',
         badge: 'WAV',
-        tier: 'audio',
+        tier: 'audio-hi',
         title: 'WAV · Kayıpsız PCM (16-bit)',
         sub: 'Sıkıştırılmamış stüdyo PCM',
         sizeText: wavSize
@@ -880,7 +880,7 @@
       }
       .sep::after { content: ""; flex: 1; height: 1px; background: rgba(240, 246, 252, 0.08); }
       .row-btn {
-        width: 100%; display: grid; grid-template-columns: 3px 1fr auto auto auto;
+        width: 100%; display: grid; grid-template-columns: auto 1fr auto auto auto;
         align-items: center; gap: 9px;
         padding: 6px 8px; border-radius: 8px; border: 1px solid transparent;
         background: transparent; color: var(--text); cursor: pointer; text-align: left;
@@ -888,15 +888,21 @@
       }
       .row-btn:hover { background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 110, 60, 0.35); }
       .row-btn.best { background: rgba(255, 72, 24, 0.08); border-color: rgba(255, 102, 36, 0.28); }
-      .tier-bar {
-        width: 3px; height: 22px; border-radius: 99px;
-        background: rgba(154, 162, 177, 0.45);
+      .q-chip {
+        min-width: 50px; padding: 3px 7px; border-radius: 6px;
+        font-size: 10.5px; font-weight: 700; letter-spacing: .02em; text-align: center;
+        border: 1px solid rgba(148, 163, 184, 0.35);
+        background: rgba(148, 163, 184, 0.12); color: #cbd5e1;
+        white-space: nowrap; flex-shrink: 0;
       }
-      .tier-bar[data-tier="uhd"] { background: linear-gradient(180deg, #ff2a18, #ff8a00); }
-      .tier-bar[data-tier="qhd"] { background: #fb923c; }
-      .tier-bar[data-tier="fhd"] { background: #f8fafc; }
-      .tier-bar[data-tier="hd"] { background: #94a3b8; }
-      .tier-bar[data-tier="audio"] { background: #3fb950; }
+      .q-chip[data-tier="uhd"] { background: rgba(251, 191, 36, 0.14); border-color: rgba(251, 191, 36, 0.45); color: #fcd34d; }
+      .q-chip[data-tier="qhd"] { background: rgba(167, 139, 250, 0.14); border-color: rgba(167, 139, 250, 0.45); color: #c4b5fd; }
+      .q-chip[data-tier="fhd"] { background: rgba(52, 211, 153, 0.14); border-color: rgba(52, 211, 153, 0.45); color: #6ee7b7; }
+      .q-chip[data-tier="hd"] { background: rgba(56, 189, 248, 0.14); border-color: rgba(56, 189, 248, 0.45); color: #7dd3fc; }
+      .q-chip[data-tier="sd"] { background: rgba(148, 163, 184, 0.12); border-color: rgba(148, 163, 184, 0.35); color: #cbd5e1; }
+      .q-chip[data-tier="audio-hi"] { background: rgba(16, 185, 129, 0.15); border-color: rgba(16, 185, 129, 0.45); color: #6ee7b7; }
+      .q-chip[data-tier="audio-mid"] { background: rgba(6, 182, 212, 0.14); border-color: rgba(6, 182, 212, 0.45); color: #67e8f9; }
+      .q-chip[data-tier="audio"] { background: rgba(245, 158, 11, 0.13); border-color: rgba(245, 158, 11, 0.4); color: #fcd34d; }
       .r-main { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
       .r-title { font-size: 12px; font-weight: 600; color: #f5f6f8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .r-sub { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -1260,7 +1266,7 @@
         const btn = el(
           'button',
           { type: 'button', class: row.best ? 'row-btn best' : 'row-btn' },
-          el('span', { class: 'tier-bar', 'data-tier': row.tier }),
+          el('span', { class: 'q-chip', 'data-tier': row.tier || 'sd' }, row.badge || row.title),
           el('span', { class: 'r-main' }, el('span', { class: 'r-title' }, row.title), el('span', { class: 'r-sub' }, row.sub)),
           row.sizeText ? el('span', { class: 'r-size' }, row.sizeText) : el('span', { class: 'r-size' }, ''),
           el('span', { class: 'r-dl' }, '↓'),
@@ -1277,7 +1283,7 @@
         const clipRowBtn = el(
           'button',
           { type: 'button', class: 'row-btn best', style: 'margin-bottom:4px' },
-          el('span', { class: 'tier-bar', 'data-tier': 'uhd' }),
+          el('span', { class: 'q-chip', 'data-tier': 'uhd' }, 'KESİT'),
           el(
             'span',
             { class: 'r-main' },
@@ -1339,8 +1345,8 @@
           });
           const rowEl = el(
             'div',
-            { class: 'row-btn', style: 'grid-template-columns:3px 1fr auto;cursor:default' },
-            el('span', { class: 'tier-bar', 'data-tier': 'hd' }),
+            { class: 'row-btn', style: 'grid-template-columns:auto 1fr auto;cursor:default' },
+            el('span', { class: 'q-chip', 'data-tier': 'hd' }, 'BÖLÜM'),
             el(
               'span',
               { class: 'r-main' },

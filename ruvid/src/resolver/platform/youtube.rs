@@ -238,15 +238,19 @@ async fn probe_stream_not_forbidden(
     source: &MediaSource,
     user_agent: &str,
 ) -> bool {
-    let candidate = source
+    let audio_candidate = source
         .streams
         .iter()
-        .find(|s| s.id == "itag-140" || s.kind == StreamKind::Audio)
-        .or_else(|| source.streams.first());
-    if candidate.is_none() {
+        .find(|s| s.id == "itag-140" || s.kind == StreamKind::Audio);
+    let video_candidate = source
+        .streams
+        .iter()
+        .find(|s| matches!(s.kind, StreamKind::Video | StreamKind::VideoAudio));
+    if audio_candidate.is_none() && video_candidate.is_none() {
         return false;
     }
-    probe_single_stream_url(ctx, candidate, user_agent).await
+    probe_single_stream_url(ctx, audio_candidate, user_agent).await
+        && probe_single_stream_url(ctx, video_candidate, user_agent).await
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

@@ -200,7 +200,7 @@ pub async fn execute_download_with_progress(
         crate::resolver::set_preferred_local_ipv4(prev_preferred);
     }
 
-    for skip in 1..=2 {
+    for skip in 1..=3 {
         let mut retry_job = job.clone();
         // Reset resume state and step down concurrency before switching Innertube client profiles
         // so fresh signed CDN URLs never collide with stale partial checkpoints or burst limits.
