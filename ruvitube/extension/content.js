@@ -406,29 +406,34 @@
 
       const top = sorted[0];
       const topBadge = resBadge(Number(top.height));
+      const topCont = String(top.container || 'mp4').toUpperCase();
+      const topCodec = codecShort(top.vcodec);
       const topTotal = (top.total_bytes || 0) + (top.kind === 'video' ? audioBytes : 0);
       videoRows.push({
         type: 'Video',
         quality: 'best',
         badge: topBadge.text,
         tier: topBadge.tier,
+        fmtTags: [topCont, topCodec].filter(Boolean),
         best: true,
         title: 'En iyi kalite (Otomatik DASH + Ses)',
-        sub: [resName(Number(top.height)), String(top.container || 'mp4').toUpperCase(), codecShort(top.vcodec), fpsClass(top) ? `${fpsClass(top)}fps` : '', top.hdr ? 'HDR' : ''].filter(Boolean).join(' · '),
+        sub: [resName(Number(top.height)), topCont, topCodec, fpsClass(top) ? `${fpsClass(top)}fps` : '', top.hdr ? 'HDR' : ''].filter(Boolean).join(' · '),
         sizeText: formatSize(topTotal, topTotal > 0 && top.kind === 'video')
       });
 
       const bestAvc = sorted.find(f => codecShort(f.vcodec) === 'H.264');
       if (bestAvc) {
         const avcH = Number(bestAvc.height) || 720;
+        const avcBadge = resBadge(avcH);
         const avcTotal = (bestAvc.total_bytes || 0) + (bestAvc.kind === 'video' ? audioBytes : 0);
         videoRows.push({
           type: 'Video',
           quality: 'h264',
-          badge: 'MP4',
-          tier: 'fhd',
+          badge: avcBadge.text,
+          tier: avcBadge.tier,
+          fmtTags: ['MP4', 'H.264'],
           title: `MP4 · H.264 + AAC (${resName(avcH)})`,
-          sub: 'Windows Media Player ve tüm cihazlarda açılır',
+          sub: 'MP4 konteyner · tüm cihazlarda açılır',
           sizeText: formatSize(avcTotal, avcTotal > 0 && bestAvc.kind === 'video')
         });
       }
@@ -449,9 +454,10 @@
           quality: qSpec,
           badge: b.text,
           tier: b.tier,
+          fmtTags: [cont, codec].filter(Boolean),
           hdr: !!f.hdr,
-          title: [resName(h), fps ? `${fps}fps` : '', cont].filter(Boolean).join(' · '),
-          sub: [codec, f.tbr > 0 ? `${f.tbr} kbps` : '', f.kind === 'video' ? '+ Ses Remux' : 'Tek akış'].filter(Boolean).join(' · '),
+          title: [resName(h), fps ? `${fps}fps` : ''].filter(Boolean).join(' · '),
+          sub: [cont, codec, f.tbr > 0 ? `${f.tbr} kbps` : '', f.kind === 'video' ? '+ Ses Remux' : 'Tek akış'].filter(Boolean).join(' · '),
           sizeText: formatSize(total, total > 0 && f.kind === 'video')
         });
       }
@@ -472,6 +478,7 @@
           quality: q,
           badge,
           tier,
+          fmtTags: ['MP4'],
           best: q === 'best',
           title: label,
           sub: 'Saf Rust paralel indirme',
@@ -493,6 +500,7 @@
         quality: '320kbps',
         badge: '320k',
         tier: 'audio-hi',
+        fmtTags: ['MP3'],
         title: 'MP3 · 320 kbps (En Yüksek)',
         sub: 'Saf Rust Symphonia + rusty_mp3',
         sizeText: estKbps(320)
@@ -502,6 +510,7 @@
         quality: '256kbps',
         badge: '256k',
         tier: 'audio-mid',
+        fmtTags: ['MP3'],
         title: 'MP3 · 256 kbps (Yüksek)',
         sub: 'Saf Rust Symphonia + rusty_mp3',
         sizeText: estKbps(256)
@@ -511,6 +520,7 @@
         quality: '192kbps',
         badge: '192k',
         tier: 'audio-mid',
+        fmtTags: ['MP3'],
         title: 'MP3 · 192 kbps (Standart)',
         sub: 'Dengeli boyut ve yüksek kalite',
         sizeText: estKbps(192)
@@ -520,6 +530,7 @@
         quality: '128kbps',
         badge: '128k',
         tier: 'audio',
+        fmtTags: ['MP3'],
         title: 'MP3 · 128 kbps (Kompakt)',
         sub: 'Küçük dosya boyutu',
         sizeText: estKbps(128)
@@ -529,6 +540,7 @@
         quality: 'vbr',
         badge: 'VBR',
         tier: 'audio-mid',
+        fmtTags: ['MP3'],
         title: 'MP3 · VBR (Değişken Bit Hızı)',
         sub: 'Akıllı psikoakustik V2 profili',
         sizeText: estKbps(190)
@@ -538,6 +550,7 @@
         quality: 'original',
         badge: 'M4A',
         tier: 'audio-hi',
+        fmtTags: ['M4A', 'AAC'],
         title: 'M4A · Orijinal Ses (AAC)',
         sub: 'Kayıpsız konteyner aktarımlı AAC',
         sizeText: m4aSize
@@ -547,6 +560,7 @@
         quality: 'original',
         badge: 'OPUS',
         tier: 'audio-hi',
+        fmtTags: ['WEBM', 'OPUS'],
         title: 'Opus · Orijinal Ses (WebM)',
         sub: 'Yeniden kodlamasız orijinal akış',
         sizeText: opusSize
@@ -556,6 +570,7 @@
         quality: 'original',
         badge: 'WAV',
         tier: 'audio-hi',
+        fmtTags: ['WAV'],
         title: 'WAV · Kayıpsız PCM (16-bit)',
         sub: 'Sıkıştırılmamış stüdyo PCM',
         sizeText: wavSize
@@ -843,33 +858,18 @@
         border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, 0.015);
       }
       .fav-strip {
-        padding: 6px 10px; border-bottom: 1px solid var(--line);
+        padding: 6px 8px; border-bottom: 1px solid var(--line);
         background: rgba(255, 196, 60, 0.05);
-        display: flex; flex-direction: column; gap: 5px;
+        display: flex; flex-direction: column; gap: 4px;
       }
       .fav-strip[hidden] { display: none; }
       .fav-head {
         display: flex; align-items: center; justify-content: space-between;
+        padding: 0 4px;
         font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
         color: #f6c453;
       }
-      .fav-chips { display: flex; flex-wrap: wrap; gap: 5px; }
-      .fav-chip {
-        display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
-        padding: 4px 7px 4px 8px; border-radius: 7px;
-        background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(246, 196, 83, 0.34);
-        color: #f8fafc; font: 600 11px/1.2 inherit; cursor: pointer;
-        transition: background .12s, border-color .12s;
-      }
-      .fav-chip:hover { background: rgba(255, 82, 24, 0.18); border-color: rgba(255, 118, 56, 0.6); }
-      .fav-chip .f-lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
-      .fav-chip .f-sz { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
-      .fav-chip .f-x {
-        display: inline-flex; align-items: center; justify-content: center;
-        width: 14px; height: 14px; border-radius: 4px; border: 0; padding: 0;
-        background: transparent; color: #f6c453; font-size: 11px; cursor: pointer;
-      }
-      .fav-chip .f-x:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
+      .fav-rows { display: flex; flex-direction: column; gap: 2px; max-height: 150px; overflow-y: auto; scrollbar-width: thin; }
       .list {
         max-height: 290px; overflow-y: auto; padding: 6px 8px;
         scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
@@ -904,7 +904,21 @@
       .q-chip[data-tier="audio-mid"] { background: rgba(6, 182, 212, 0.14); border-color: rgba(6, 182, 212, 0.45); color: #67e8f9; }
       .q-chip[data-tier="audio"] { background: rgba(245, 158, 11, 0.13); border-color: rgba(245, 158, 11, 0.4); color: #fcd34d; }
       .r-main { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
+      .r-title-row { display: flex; align-items: center; gap: 5px; min-width: 0; }
       .r-title { font-size: 12px; font-weight: 600; color: #f5f6f8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .fmt-chip {
+        padding: 1px 5px; border-radius: 4px; font-size: 9.5px; font-weight: 700; letter-spacing: .03em;
+        border: 1px solid rgba(148, 163, 184, 0.35); background: rgba(148, 163, 184, 0.12); color: #cbd5e1;
+        white-space: nowrap; flex-shrink: 0;
+      }
+      .fmt-chip[data-fmt="mp4"] { background: rgba(99, 102, 241, 0.16); border-color: rgba(99, 102, 241, 0.42); color: #a5b4fc; }
+      .fmt-chip[data-fmt="webm"] { background: rgba(192, 132, 252, 0.14); border-color: rgba(192, 132, 252, 0.42); color: #e9d5ff; }
+      .fmt-chip[data-fmt="vp9"], .fmt-chip[data-fmt="av1"] { background: rgba(168, 85, 247, 0.14); border-color: rgba(168, 85, 247, 0.4); color: #d8b4fe; }
+      .fmt-chip[data-fmt="h264"] { background: rgba(59, 130, 246, 0.14); border-color: rgba(59, 130, 246, 0.4); color: #93c5fd; }
+      .fmt-chip[data-fmt="mp3"] { background: rgba(244, 63, 94, 0.14); border-color: rgba(244, 63, 94, 0.4); color: #fda4af; }
+      .fmt-chip[data-fmt="m4a"], .fmt-chip[data-fmt="aac"] { background: rgba(20, 184, 166, 0.15); border-color: rgba(20, 184, 166, 0.42); color: #5eead4; }
+      .fmt-chip[data-fmt="opus"] { background: rgba(6, 182, 212, 0.14); border-color: rgba(6, 182, 212, 0.42); color: #67e8f9; }
+      .fmt-chip[data-fmt="wav"] { background: rgba(245, 158, 11, 0.14); border-color: rgba(245, 158, 11, 0.42); color: #fde68a; }
       .r-sub { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .r-size {
         font-size: 11px; font-weight: 500; color: #b6bfce;
@@ -1217,43 +1231,10 @@
         tabsEl.appendChild(tb);
       }
 
-      // Pinned Favorites strip (always fixed above scroll area)
-      const favIds = getFavList();
-      const allPool = [...videoRows, ...audioRows];
-      if (favIds.length > 0 && activeMenuTab !== 'chapters') {
-        favStripEl.removeAttribute('hidden');
-        favStripEl.appendChild(el('div', { class: 'fav-head' }, el('span', {}, '★ Sabitlenmiş Favoriler'), el('span', { style: 'font-weight:500;opacity:.8' }, 'Tek tıkla indir')));
-        const chipsWrap = el('div', { class: 'fav-chips' });
-        for (const fid of favIds) {
-          const matched = allPool.find(r => favId(r) === fid);
-          const dlType = matched ? matched.type : fid.split(':')[0];
-          const dlQual = matched ? matched.quality : fid.split(':').slice(1).join(':');
-          const lblText = matched ? (matched.type === 'MP3' ? `MP3 ${matched.quality}` : matched.title.split('·')[0].trim() + (matched.sub.includes('MP4') ? ' MP4' : '')) : favShortLabel(fid);
-          const chipBtn = el('div', { class: 'fav-chip', role: 'button', tabindex: '0', title: `${lblText} — Favoriden hemen indir` },
-            el('span', { style: 'color:#f6c453;font-size:11px' }, '★'),
-            el('span', { class: 'f-lbl' }, lblText),
-            matched && matched.sizeText ? el('span', { class: 'f-sz' }, matched.sizeText) : null
-          );
-          const unpin = el('button', { type: 'button', class: 'f-x', title: 'Favorilerden kaldır' }, '×');
-          unpin.addEventListener('click', ev => {
-            ev.stopPropagation();
-            saveSettings({ favorites: getFavList().filter(x => x !== fid) });
-            renderMenu();
-          });
-          chipBtn.appendChild(unpin);
-          chipBtn.addEventListener('click', () => {
-            closeMenu();
-            start(dlType, dlQual, null);
-          });
-          chipsWrap.appendChild(chipBtn);
-        }
-        favStripEl.appendChild(chipsWrap);
-      } else {
-        favStripEl.setAttribute('hidden', 'true');
-      }
-
-      const buildFormatRowEl = row => {
-        const starred = isFavRow(row);
+      const normFmt = t => String(t || '').toLowerCase().replace(/[^a-z0-9]/g, '');
+      const buildFormatRowEl = (row, overrideFid) => {
+        const fidKey = overrideFid || favId(row);
+        const starred = getFavList().includes(fidKey);
         const favBtn = el('button', {
           type: 'button',
           class: starred ? 'fav-btn active' : 'fav-btn',
@@ -1261,13 +1242,26 @@
         }, starred ? '★' : '☆');
         favBtn.addEventListener('click', ev => {
           ev.stopPropagation();
-          toggleFavRow(row);
+          if (overrideFid) {
+            saveSettings({ favorites: getFavList().filter(x => x !== overrideFid) });
+            renderMenu();
+          } else {
+            toggleFavRow(row);
+          }
         });
+        const tagEls = (Array.isArray(row.fmtTags) ? row.fmtTags : [])
+          .filter(Boolean)
+          .map(tag => el('span', { class: 'fmt-chip', 'data-fmt': normFmt(tag) }, tag));
         const btn = el(
           'button',
           { type: 'button', class: row.best ? 'row-btn best' : 'row-btn' },
           el('span', { class: 'q-chip', 'data-tier': row.tier || 'sd' }, row.badge || row.title),
-          el('span', { class: 'r-main' }, el('span', { class: 'r-title' }, row.title), el('span', { class: 'r-sub' }, row.sub)),
+          el(
+            'span',
+            { class: 'r-main' },
+            el('span', { class: 'r-title-row' }, el('span', { class: 'r-title' }, row.title), ...tagEls),
+            el('span', { class: 'r-sub' }, row.sub)
+          ),
           row.sizeText ? el('span', { class: 'r-size' }, row.sizeText) : el('span', { class: 'r-size' }, ''),
           el('span', { class: 'r-dl' }, '↓'),
           favBtn
@@ -1278,6 +1272,43 @@
         });
         return btn;
       };
+
+      const fallbackFavRow = fid => {
+        const idx = fid.indexOf(':');
+        const dlType = idx > 0 ? fid.slice(0, idx) : 'Video';
+        const dlQual = idx > 0 ? fid.slice(idx + 1) : fid;
+        if (dlType === 'MP3') {
+          const shortB = dlQual === 'vbr' ? 'VBR' : dlQual.replace('kbps', 'k');
+          const tTier = dlQual === '320kbps' ? 'audio-hi' : (dlQual === '128kbps' ? 'audio' : 'audio-mid');
+          return { type: dlType, quality: dlQual, badge: shortB, tier: tTier, fmtTags: ['MP3'], title: favShortLabel(fid), sub: 'Kayıtlı favori · Saf Rust', sizeText: '' };
+        }
+        if (dlType === 'M4A' || dlType === 'OPUS' || dlType === 'WAV') {
+          const tags = dlType === 'M4A' ? ['M4A', 'AAC'] : (dlType === 'OPUS' ? ['WEBM', 'OPUS'] : ['WAV']);
+          return { type: dlType, quality: dlQual, badge: dlType, tier: 'audio-hi', fmtTags: tags, title: favShortLabel(fid), sub: 'Kayıtlı favori · Orijinal akış', sizeText: '' };
+        }
+        const m = /(\d+)p/i.exec(dlQual);
+        const h = m ? Number(m[1]) : 0;
+        const b = h > 0 ? resBadge(h) : (dlQual === 'h264' ? { text: 'MP4', tier: 'fhd' } : { text: 'MAX', tier: 'uhd' });
+        const cont = dlQual.toLowerCase().includes(':webm') ? 'WEBM' : 'MP4';
+        const tags = dlQual === 'h264' ? ['MP4', 'H.264'] : [cont];
+        return { type: dlType, quality: dlQual, badge: b.text, tier: b.tier, fmtTags: tags, title: favShortLabel(fid), sub: 'Kayıtlı favori · Saf Rust', sizeText: '' };
+      };
+
+      // Pinned Favorites strip (always fixed above scroll area, identical row design)
+      const favIds = getFavList();
+      const allPool = [...videoRows, ...audioRows];
+      if (favIds.length > 0 && activeMenuTab !== 'chapters') {
+        favStripEl.removeAttribute('hidden');
+        favStripEl.appendChild(el('div', { class: 'fav-head' }, el('span', {}, '★ Sabitlenmiş Favoriler'), el('span', { style: 'font-weight:500;opacity:.8' }, 'Tek tıkla indir')));
+        const rowsWrap = el('div', { class: 'fav-rows' });
+        for (const fid of favIds) {
+          const matched = allPool.find(r => favId(r) === fid);
+          rowsWrap.appendChild(buildFormatRowEl(matched || fallbackFavRow(fid), matched ? null : fid));
+        }
+        favStripEl.appendChild(rowsWrap);
+      } else {
+        favStripEl.setAttribute('hidden', 'true');
+      }
 
       if (activeMenuTab === 'chapters') {
         const clipRowBtn = el(
