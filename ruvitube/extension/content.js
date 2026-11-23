@@ -26,7 +26,8 @@
     clipLength: 30,
     jobs: 4,
     showStatus: true,
-    showFloatingPill: true
+    showFloatingPill: false,
+    favorites: []
   };
 
   const VALID_JOBS = [1, 2, 4, 8, 16];
@@ -143,11 +144,11 @@
     style.id = STYLE_ID;
     style.textContent = `
       .rt-container{display:inline-flex!important;flex-flow:row nowrap!important;align-items:center;justify-content:flex-start;gap:6px;margin-left:8px;position:relative;font-family:"Segoe UI",Roboto,Arial,sans-serif;z-index:2000;vertical-align:middle;white-space:nowrap!important;flex:0 0 auto!important;min-width:max-content}
-      .rt-btn{position:relative;overflow:hidden;background:linear-gradient(135deg,#ff2a18 0%,#ff5700 55%,#ff7b00 100%);color:#ffffff;border:1px solid rgba(255,160,110,.45);border-radius:18px;padding:0 13px 0 9px;height:36px;font-size:12.5px;font-weight:700;display:inline-flex;align-items:center;justify-content:center;gap:7px;cursor:pointer;box-sizing:border-box;box-shadow:0 4px 14px rgba(255,68,0,.34),inset 0 1px 0 rgba(255,255,255,.26);transition:transform .15s,box-shadow .18s,filter .18s;line-height:normal;white-space:nowrap;flex:0 0 auto!important}
+      .rt-btn{position:relative;overflow:hidden;background:linear-gradient(135deg,#ff2a18 0%,#ff5700 58%,#ff7b00 100%);color:#ffffff;border:1px solid rgba(255,175,130,.48);border-radius:12px;padding:0;width:36px;height:36px;display:inline-flex;align-items:center;justify-content:center;cursor:pointer;box-sizing:border-box;box-shadow:0 4px 14px rgba(255,68,0,.32),inset 0 1px 0 rgba(255,255,255,.28);transition:transform .15s,box-shadow .18s,filter .18s;flex:0 0 auto!important}
       .rt-btn:hover{filter:brightness(1.08);box-shadow:0 6px 18px rgba(255,75,0,.48),inset 0 1px 0 rgba(255,255,255,.35);transform:translateY(-1px)}
       .rt-btn:active{transform:translateY(0)}
-      .rt-btn-ico{width:20px;height:20px;border-radius:6px;display:inline-flex;align-items:center;justify-content:center;background:rgba(15,13,19,.24);box-shadow:inset 0 0 0 1px rgba(255,255,255,.22);flex:none}
-      .rt-status{font-size:11.5px;color:#ffb499;margin-left:4px;max-width:210px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:none}
+      .rt-btn-ico{display:inline-flex;align-items:center;justify-content:center;flex:none}
+      .rt-status{font-size:11.5px;color:#ffb499;margin-left:4px;max-width:190px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;display:none}
     `;
     document.head.appendChild(style);
   }
@@ -765,11 +766,12 @@
       .wrap {
         position: relative;
         font-family: "Segoe UI Variable Text", "Segoe UI", Roboto, system-ui, sans-serif;
-        --bg: rgba(16, 14, 18, 0.92);
-        --surface: #1b171d;
-        --border: rgba(255, 120, 70, 0.22);
-        --text: #f8f6f4;
-        --muted: #a69ba0;
+        --bg: rgba(14, 15, 19, 0.96);
+        --surface: #181a20;
+        --border: rgba(255, 110, 60, 0.22);
+        --line: rgba(255, 255, 255, 0.08);
+        --text: #f5f6f8;
+        --muted: #9aa2b1;
         --accent: #ff4d1a;
         --audio: #3fb950;
       }
@@ -807,85 +809,141 @@
       .wrap:hover .dismiss { opacity: 1; }
       .dismiss:hover { background: #da3633; color: #fff; }
       .menu {
-        position: absolute; top: 40px; right: 0; width: 356px;
+        position: absolute; top: 40px; right: 0; width: 368px;
         background: var(--bg); color: var(--text);
         backdrop-filter: blur(22px) saturate(180%);
         -webkit-backdrop-filter: blur(22px) saturate(180%);
         border: 1px solid var(--border); border-radius: 14px;
-        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.65);
+        box-shadow: 0 24px 60px rgba(0, 0, 0, 0.7);
         overflow: hidden; display: none; flex-direction: column;
       }
       .menu.open { display: flex; }
       .meta {
-        display: grid; grid-template-columns: 112px minmax(0, 1fr); gap: 10px;
-        padding: 10px 12px; border-bottom: 1px solid var(--border);
-        background: linear-gradient(135deg, rgba(255, 58, 24, 0.14), rgba(255, 115, 0, 0.06)); align-items: center;
+        display: flex; align-items: center; justify-content: space-between; gap: 10px;
+        padding: 10px 13px; border-bottom: 1px solid var(--line);
+        background: linear-gradient(90deg, rgba(255, 72, 24, 0.08), rgba(255, 255, 255, 0.01));
       }
-      .thumb {
-        position: relative; width: 112px; height: 63px; border-radius: 8px; overflow: hidden;
-        background: #161b22; border: 1px solid var(--border);
-      }
-      .thumb img { width: 100%; height: 100%; object-fit: cover; display: block; }
-      .dur {
-        position: absolute; right: 4px; bottom: 4px; padding: 1px 5px; border-radius: 4px;
-        background: rgba(0, 0, 0, 0.78); color: #fff; font-size: 10px; font-weight: 600;
-      }
+      .meta-left { min-width: 0; flex: 1; }
       .v-title {
-        font-size: 12px; font-weight: 600; line-height: 1.3; color: #f0f6fc;
-        display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+        font-size: 12.5px; font-weight: 700; line-height: 1.25; color: #f5f6f8;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
-      .v-tags { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 5px; }
-      .tag {
-        font-size: 10px; font-weight: 600; padding: 1px 6px; border-radius: 999px;
-        background: rgba(255, 255, 255, 0.08); color: #c9d1d9; border: 1px solid rgba(255, 255, 255, 0.08);
+      .v-meta-sub {
+        font-size: 10.5px; color: var(--muted); margin-top: 2px;
+        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       }
+      .dur-pill {
+        flex: none; padding: 2px 7px; border-radius: 6px;
+        background: rgba(255, 255, 255, 0.06); border: 1px solid var(--line);
+        color: #d8dee9; font-size: 10.5px; font-weight: 600;
+        font-variant-numeric: tabular-nums; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+      }
+      .tabs-bar {
+        display: flex; gap: 5px; padding: 6px 10px;
+        border-bottom: 1px solid var(--line); background: rgba(255, 255, 255, 0.015);
+      }
+      .fav-strip {
+        padding: 6px 10px; border-bottom: 1px solid var(--line);
+        background: rgba(255, 196, 60, 0.05);
+        display: flex; flex-direction: column; gap: 5px;
+      }
+      .fav-strip[hidden] { display: none; }
+      .fav-head {
+        display: flex; align-items: center; justify-content: space-between;
+        font-size: 10px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+        color: #f6c453;
+      }
+      .fav-chips { display: flex; flex-wrap: wrap; gap: 5px; }
+      .fav-chip {
+        display: inline-flex; align-items: center; gap: 5px; max-width: 100%;
+        padding: 4px 7px 4px 8px; border-radius: 7px;
+        background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(246, 196, 83, 0.34);
+        color: #f8fafc; font: 600 11px/1.2 inherit; cursor: pointer;
+        transition: background .12s, border-color .12s;
+      }
+      .fav-chip:hover { background: rgba(255, 82, 24, 0.18); border-color: rgba(255, 118, 56, 0.6); }
+      .fav-chip .f-lbl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 190px; }
+      .fav-chip .f-sz { font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+      .fav-chip .f-x {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 14px; height: 14px; border-radius: 4px; border: 0; padding: 0;
+        background: transparent; color: #f6c453; font-size: 11px; cursor: pointer;
+      }
+      .fav-chip .f-x:hover { background: rgba(255, 255, 255, 0.12); color: #fff; }
       .list {
-        max-height: 320px; overflow-y: auto; padding: 6px;
+        max-height: 290px; overflow-y: auto; padding: 6px 8px;
         scrollbar-width: thin; scrollbar-color: rgba(255, 255, 255, 0.2) transparent;
       }
       .sep {
-        padding: 7px 8px 4px; font-size: 10px; font-weight: 700; letter-spacing: .06em;
+        padding: 6px 6px 3px; font-size: 10px; font-weight: 700; letter-spacing: .06em;
         text-transform: uppercase; color: var(--muted); display: flex; align-items: center; gap: 6px;
       }
-      .sep::after { content: ""; flex: 1; height: 1px; background: rgba(240, 246, 252, 0.1); }
+      .sep::after { content: ""; flex: 1; height: 1px; background: rgba(240, 246, 252, 0.08); }
       .row-btn {
-        width: 100%; display: grid; grid-template-columns: 46px 1fr auto; align-items: center; gap: 9px;
-        padding: 6px 8px; border-radius: 9px; border: 1px solid transparent;
+        width: 100%; display: grid; grid-template-columns: 3px 1fr auto auto auto;
+        align-items: center; gap: 9px;
+        padding: 6px 8px; border-radius: 8px; border: 1px solid transparent;
         background: transparent; color: var(--text); cursor: pointer; text-align: left;
         font: inherit; transition: background .12s, border-color .12s;
       }
-      .row-btn:hover { background: rgba(255, 82, 24, 0.16); border-color: rgba(255, 102, 36, 0.42); }
-      .row-btn.best { background: rgba(255, 72, 24, 0.11); border-color: rgba(255, 102, 36, 0.34); }
-      .badge {
-        height: 22px; border-radius: 6px; font-size: 10.5px; font-weight: 800;
-        display: flex; align-items: center; justify-content: center;
-        background: rgba(139, 148, 158, 0.18); color: #f0f6fc; border: 1px solid rgba(255, 255, 255, 0.14);
+      .row-btn:hover { background: rgba(255, 255, 255, 0.05); border-color: rgba(255, 110, 60, 0.35); }
+      .row-btn.best { background: rgba(255, 72, 24, 0.08); border-color: rgba(255, 102, 36, 0.28); }
+      .tier-bar {
+        width: 3px; height: 22px; border-radius: 99px;
+        background: rgba(154, 162, 177, 0.45);
       }
-      .badge[data-tier="uhd"] { background: linear-gradient(135deg, #ff2a18, #ff7b00); border-color: rgba(255, 180, 120, 0.55); }
-      .badge[data-tier="qhd"] { background: linear-gradient(135deg, #f97316, #ea580c); border-color: rgba(253, 186, 116, 0.5); }
-      .badge[data-tier="fhd"] { background: linear-gradient(135deg, #ff4d1a, #e11d48); border-color: rgba(255, 150, 130, 0.5); }
-      .badge[data-tier="hd"] { background: rgba(255, 87, 34, 0.24); border-color: rgba(255, 110, 64, 0.48); color: #ffd8c2; }
-      .badge[data-tier="audio"] { background: rgba(63, 185, 80, 0.22); border-color: rgba(63, 185, 80, 0.5); color: #aff5b4; }
+      .tier-bar[data-tier="uhd"] { background: linear-gradient(180deg, #ff2a18, #ff8a00); }
+      .tier-bar[data-tier="qhd"] { background: #fb923c; }
+      .tier-bar[data-tier="fhd"] { background: #f8fafc; }
+      .tier-bar[data-tier="hd"] { background: #94a3b8; }
+      .tier-bar[data-tier="audio"] { background: #3fb950; }
       .r-main { min-width: 0; display: flex; flex-direction: column; gap: 1px; }
-      .r-title { font-size: 12px; font-weight: 600; color: #f0f6fc; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+      .r-title { font-size: 12px; font-weight: 600; color: #f5f6f8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .r-sub { font-size: 10.5px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
       .r-size {
-        font-size: 10.5px; font-weight: 600; color: #ffd2b8; padding: 2px 7px; border-radius: 999px;
-        background: rgba(255, 82, 24, 0.15); border: 1px solid rgba(255, 102, 36, 0.3); white-space: nowrap;
+        font-size: 11px; font-weight: 500; color: #b6bfce;
+        font-variant-numeric: tabular-nums; font-family: ui-monospace, "Cascadia Mono", Consolas, monospace;
+        white-space: nowrap;
       }
+      .r-dl {
+        font-size: 12px; font-weight: 700; color: var(--accent);
+        opacity: 0; transition: opacity .12s; padding: 0 2px;
+      }
+      .row-btn:hover .r-dl { opacity: 1; }
+      .fav-btn {
+        width: 22px; height: 22px; border-radius: 6px; border: 0; padding: 0;
+        background: transparent; color: #64748b; font-size: 13px; line-height: 1;
+        display: inline-flex; align-items: center; justify-content: center; cursor: pointer;
+        opacity: 0.45; transition: opacity .12s, color .12s, background .12s;
+      }
+      .row-btn:hover .fav-btn, .fav-btn.active { opacity: 1; }
+      .fav-btn.active { color: #f6c453; }
+      .fav-btn:hover { background: rgba(255, 255, 255, 0.08); color: #f6c453; }
       .foot {
-        display: flex; align-items: center; justify-content: space-between; gap: 6px;
-        padding: 8px 10px; border-top: 1px solid var(--border); background: rgba(0, 0, 0, 0.25);
+        display: flex; align-items: center; justify-content: space-between; gap: 8px;
+        padding: 7px 10px; border-top: 1px solid var(--line); background: rgba(0, 0, 0, 0.28);
       }
-      .foot-btn {
-        background: #21262d; color: #f0f6fc; border: 1px solid var(--border);
-        border-radius: 7px; padding: 5px 9px; font: 600 11px/1.2 inherit; cursor: pointer;
+      .spd-group { display: inline-flex; align-items: center; gap: 3px; }
+      .spd-ico { font-size: 11px; color: #ff8a47; margin-right: 2px; user-select: none; }
+      .spd-btn {
+        padding: 3px 6px; border-radius: 6px; border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.03); color: var(--muted);
+        font: 600 10.5px/1.2 inherit; cursor: pointer;
+        transition: background .12s, color .12s, border-color .12s;
       }
-      .foot-btn:hover { background: #30363d; }
-      .foot select {
-        background: #0d1117; color: #f0f6fc; border: 1px solid var(--border);
-        border-radius: 7px; padding: 4px 6px; font: 600 11px inherit;
+      .spd-btn:hover { color: #fff; background: rgba(255, 255, 255, 0.08); }
+      .spd-btn.active {
+        background: linear-gradient(135deg, #ff2e18, #ff6b00);
+        border-color: rgba(255, 160, 110, 0.55); color: #fff; font-weight: 700;
       }
+      .foot-actions { display: inline-flex; align-items: center; gap: 4px; }
+      .foot-ico-btn {
+        width: 26px; height: 26px; border-radius: 7px; border: 1px solid var(--line);
+        background: rgba(255, 255, 255, 0.04); color: #d8dee9;
+        display: inline-flex; align-items: center; justify-content: center;
+        cursor: pointer; padding: 0; font-size: 13px; transition: background .12s, border-color .12s;
+      }
+      .foot-ico-btn:hover { background: rgba(255, 82, 24, 0.16); border-color: rgba(255, 110, 60, 0.45); color: #fff; }
     `;
 
     const styleEl = document.createElement('style');
@@ -911,26 +969,31 @@
       svgEl({ width: '9', height: '9', viewBox: '0 0 12 12', fill: 'none', stroke: 'currentColor', 'stroke-width': '2', 'stroke-linecap': 'round' }, [['path', { d: 'M3 3l6 6M9 3L3 9' }]])
     );
 
-    const thumbBox = el('div', { class: 'thumb' });
-    const thumbImg = el('img', { alt: '' });
-    thumbImg.referrerPolicy = 'no-referrer';
-    const durBadge = el('span', { class: 'dur' });
-    thumbBox.append(thumbImg, durBadge);
-
     const titleEl = el('div', { class: 'v-title' });
-    const tagsEl = el('div', { class: 'v-tags' });
-    const metaEl = el('div', { class: 'meta' }, thumbBox, el('div', {}, titleEl, tagsEl));
+    const metaSubEl = el('div', { class: 'v-meta-sub' });
+    const durPill = el('span', { class: 'dur-pill' });
+    const metaEl = el('div', { class: 'meta' }, el('div', { class: 'meta-left' }, titleEl, metaSubEl), durPill);
+    const tabsEl = el('div', { class: 'tabs-bar' });
+    const favStripEl = el('div', { class: 'fav-strip', hidden: 'true' });
     const listEl = el('div', { class: 'list' });
 
-    const clipOpenBtn = el('button', { class: 'foot-btn', type: 'button' }, '✂ Kesit & Bölümler');
-    const folderBtn = el('button', { class: 'foot-btn', type: 'button' }, 'Klasör');
-    const jobsSel = el('select', { title: 'Paralel İndirme Hızı' });
-    for (const j of VALID_JOBS) {
-      jobsSel.appendChild(el('option', { value: String(j) }, `Hız x${j}`));
-    }
-    const footEl = el('div', { class: 'foot' }, clipOpenBtn, jobsSel, folderBtn);
+    const spdGroup = el('div', { class: 'spd-group', title: 'Paralel İndirme Hızı' }, el('span', { class: 'spd-ico' }, '⚡'));
+    const spdBtns = VALID_JOBS.map(j => {
+      const b = el('button', { type: 'button', class: 'spd-btn', 'data-jobs': String(j), title: JOBS_LABELS[String(j)] || `x${j}` }, `x${j}`);
+      b.addEventListener('click', ev => {
+        ev.stopPropagation();
+        saveSettings({ jobs: j });
+        syncSettings();
+      });
+      spdGroup.appendChild(b);
+      return b;
+    });
 
-    const menuEl = el('div', { class: 'menu', role: 'menu' }, metaEl, listEl, footEl);
+    const clipOpenBtn = el('button', { class: 'foot-ico-btn', type: 'button', title: 'Özel Kesit Zaman Seçici (Başlangıç–Bitiş)' }, '✂');
+    const folderBtn = el('button', { class: 'foot-ico-btn', type: 'button', title: 'İndirilenler Klasörünü Aç' }, '📁');
+    const footEl = el('div', { class: 'foot' }, spdGroup, el('div', { class: 'foot-actions' }, clipOpenBtn, folderBtn));
+
+    const menuEl = el('div', { class: 'menu', role: 'menu' }, metaEl, tabsEl, favStripEl, listEl, footEl);
     const wrapEl = el('div', { class: 'wrap' }, pillBtn, dismissBtn, menuEl);
     shadow.appendChild(wrapEl);
     document.documentElement.appendChild(host);
@@ -1023,20 +1086,58 @@
 
     let activeMenuTab = 'all'; // 'all' | 'video' | 'audio' | 'chapters'
 
+    function favId(row) {
+      if (!row) return '';
+      if (row.type === 'Video' && String(row.quality || '').includes('|')) {
+        return `Video:${String(row.quality).split('|')[1]}`;
+      }
+      return `${row.type}:${row.quality}`;
+    }
+
+    function getFavList() {
+      return Array.isArray(state.settings.favorites) ? state.settings.favorites : [];
+    }
+
+    function isFavRow(row) {
+      const fid = favId(row);
+      return getFavList().includes(fid);
+    }
+
+    function toggleFavRow(row) {
+      const fid = favId(row);
+      if (!fid) return;
+      const cur = getFavList();
+      const next = cur.includes(fid) ? cur.filter(x => x !== fid) : [...cur, fid];
+      saveSettings({ favorites: next });
+      renderMenu();
+    }
+
+    function favShortLabel(fid) {
+      if (fid.startsWith('MP3:')) return `MP3 ${fid.slice(4)}`;
+      if (fid.startsWith('Video:')) {
+        const q = fid.slice(6);
+        if (q === 'best') return 'Video · En İyi';
+        if (q === 'h264') return 'MP4 · H.264';
+        return q.replace(':mp4', ' MP4').replace(':webm', ' WEBM');
+      }
+      return fid.replace(':original', '');
+    }
+
     function renderMenu() {
       const { videoRows, audioRows, duration, data } = buildQualityRows();
       titleEl.textContent = currentTitle();
-      tagsEl.textContent = '';
-      if (data && data.channel) tagsEl.appendChild(el('span', { class: 'tag' }, data.channel));
-      tagsEl.appendChild(el('span', { class: 'tag' }, 'Saf Rust'));
-      if (state.probe.loading) tagsEl.appendChild(el('span', { class: 'tag' }, 'Taranıyor...'));
+      const subParts = [];
+      if (data && data.channel) subParts.push(data.channel);
+      subParts.push('Saf Rust');
+      if (state.probe.loading) subParts.push('Taranıyor...');
+      metaSubEl.textContent = subParts.join(' · ');
 
-      const vidId = (data && data.id) || (new URLSearchParams(location.search).get('v') || '');
-      const thumbUrl = (data && data.thumbnail) || (vidId ? `https://i.ytimg.com/vi/${vidId}/mqdefault.jpg` : '');
-      if (thumbUrl && thumbImg.src !== thumbUrl) thumbImg.src = thumbUrl;
-      durBadge.textContent = data && data.isLive ? 'CANLI' : formatDuration(duration);
-      durBadge.style.display = durBadge.textContent ? 'block' : 'none';
+      const durStr = data && data.isLive ? 'CANLI' : formatDuration(duration);
+      durPill.textContent = durStr;
+      durPill.style.display = durStr ? 'inline-block' : 'none';
 
+      tabsEl.textContent = '';
+      favStripEl.textContent = '';
       listEl.textContent = '';
 
       const detectedChapters = extractYouTubeChapters();
@@ -1058,9 +1159,6 @@
         }
         return svg;
       };
-      const tabBar = el('div', {
-        style: 'display:flex;gap:5px;padding:4px 6px 6px;border-bottom:1px solid rgba(255,120,70,.16);margin-bottom:4px'
-      });
       const tabDefs = [
         {
           id: 'all',
@@ -1110,22 +1208,85 @@
           activeMenuTab = td.id;
           renderMenu();
         });
-        tabBar.appendChild(tb);
+        tabsEl.appendChild(tb);
       }
-      listEl.appendChild(tabBar);
+
+      // Pinned Favorites strip (always fixed above scroll area)
+      const favIds = getFavList();
+      const allPool = [...videoRows, ...audioRows];
+      if (favIds.length > 0 && activeMenuTab !== 'chapters') {
+        favStripEl.removeAttribute('hidden');
+        favStripEl.appendChild(el('div', { class: 'fav-head' }, el('span', {}, '★ Sabitlenmiş Favoriler'), el('span', { style: 'font-weight:500;opacity:.8' }, 'Tek tıkla indir')));
+        const chipsWrap = el('div', { class: 'fav-chips' });
+        for (const fid of favIds) {
+          const matched = allPool.find(r => favId(r) === fid);
+          const dlType = matched ? matched.type : fid.split(':')[0];
+          const dlQual = matched ? matched.quality : fid.split(':').slice(1).join(':');
+          const lblText = matched ? (matched.type === 'MP3' ? `MP3 ${matched.quality}` : matched.title.split('·')[0].trim() + (matched.sub.includes('MP4') ? ' MP4' : '')) : favShortLabel(fid);
+          const chipBtn = el('div', { class: 'fav-chip', role: 'button', tabindex: '0', title: `${lblText} — Favoriden hemen indir` },
+            el('span', { style: 'color:#f6c453;font-size:11px' }, '★'),
+            el('span', { class: 'f-lbl' }, lblText),
+            matched && matched.sizeText ? el('span', { class: 'f-sz' }, matched.sizeText) : null
+          );
+          const unpin = el('button', { type: 'button', class: 'f-x', title: 'Favorilerden kaldır' }, '×');
+          unpin.addEventListener('click', ev => {
+            ev.stopPropagation();
+            saveSettings({ favorites: getFavList().filter(x => x !== fid) });
+            renderMenu();
+          });
+          chipBtn.appendChild(unpin);
+          chipBtn.addEventListener('click', () => {
+            closeMenu();
+            start(dlType, dlQual, null);
+          });
+          chipsWrap.appendChild(chipBtn);
+        }
+        favStripEl.appendChild(chipsWrap);
+      } else {
+        favStripEl.setAttribute('hidden', 'true');
+      }
+
+      const buildFormatRowEl = row => {
+        const starred = isFavRow(row);
+        const favBtn = el('button', {
+          type: 'button',
+          class: starred ? 'fav-btn active' : 'fav-btn',
+          title: starred ? 'Favorilerden çıkar' : 'Üste sabitle (Favorilere ekle)'
+        }, starred ? '★' : '☆');
+        favBtn.addEventListener('click', ev => {
+          ev.stopPropagation();
+          toggleFavRow(row);
+        });
+        const btn = el(
+          'button',
+          { type: 'button', class: row.best ? 'row-btn best' : 'row-btn' },
+          el('span', { class: 'tier-bar', 'data-tier': row.tier }),
+          el('span', { class: 'r-main' }, el('span', { class: 'r-title' }, row.title), el('span', { class: 'r-sub' }, row.sub)),
+          row.sizeText ? el('span', { class: 'r-size' }, row.sizeText) : el('span', { class: 'r-size' }, ''),
+          el('span', { class: 'r-dl' }, '↓'),
+          favBtn
+        );
+        btn.addEventListener('click', () => {
+          closeMenu();
+          start(row.type, row.quality, null);
+        });
+        return btn;
+      };
 
       if (activeMenuTab === 'chapters') {
         const clipRowBtn = el(
           'button',
-          { type: 'button', class: 'row-btn', style: 'background:rgba(255,82,24,.10);border-color:rgba(255,102,36,.32);margin-bottom:4px' },
-          el('span', { class: 'badge', 'data-tier': 'uhd' }, '✂'),
+          { type: 'button', class: 'row-btn best', style: 'margin-bottom:4px' },
+          el('span', { class: 'tier-bar', 'data-tier': 'uhd' }),
           el(
             'span',
             { class: 'r-main' },
-            el('span', { class: 'r-title' }, 'Özel Zaman Aralığı Seç (Başlangıç – Bitiş)'),
+            el('span', { class: 'r-title' }, '✂ Özel Zaman Aralığı Seç (Başlangıç – Bitiş)'),
             el('span', { class: 'r-sub' }, 'Saniye hassasiyetinde video veya ses kesiti kırp')
           ),
-          el('span', { class: 'r-size' }, 'KESİT')
+          el('span', { class: 'r-size' }, 'KESİT'),
+          el('span', { class: 'r-dl' }, '→'),
+          el('span', {})
         );
         clipRowBtn.addEventListener('click', () => {
           closeMenu();
@@ -1135,43 +1296,21 @@
       }
 
       if (activeMenuTab === 'all' || activeMenuTab === 'video') {
-        listEl.appendChild(el('div', { class: 'sep' }, 'Video Kaliteleri (MP4 / WEBM)'));
+        listEl.appendChild(el('div', { class: 'sep' }, 'Video'));
         for (const row of videoRows) {
-          const btn = el(
-            'button',
-            { type: 'button', class: row.best ? 'row-btn best' : 'row-btn' },
-            el('span', { class: 'badge', 'data-tier': row.tier }, row.badge),
-            el('span', { class: 'r-main' }, el('span', { class: 'r-title' }, row.title), el('span', { class: 'r-sub' }, row.sub)),
-            row.sizeText ? el('span', { class: 'r-size' }, row.sizeText) : null
-          );
-          btn.addEventListener('click', () => {
-            closeMenu();
-            start(row.type, row.quality, null);
-          });
-          listEl.appendChild(btn);
+          listEl.appendChild(buildFormatRowEl(row));
         }
       }
 
       if (activeMenuTab === 'all' || activeMenuTab === 'audio') {
-        listEl.appendChild(el('div', { class: 'sep' }, 'Yalnız Ses (Otomatik MP3 & Kayıpsız)'));
+        listEl.appendChild(el('div', { class: 'sep' }, 'Ses'));
         for (const row of audioRows) {
-          const btn = el(
-            'button',
-            { type: 'button', class: 'row-btn' },
-            el('span', { class: 'badge', 'data-tier': row.tier }, row.badge),
-            el('span', { class: 'r-main' }, el('span', { class: 'r-title' }, row.title), el('span', { class: 'r-sub' }, row.sub)),
-            row.sizeText ? el('span', { class: 'r-size' }, row.sizeText) : null
-          );
-          btn.addEventListener('click', () => {
-            closeMenu();
-            start(row.type, row.quality, null);
-          });
-          listEl.appendChild(btn);
+          listEl.appendChild(buildFormatRowEl(row));
         }
       }
 
       if ((activeMenuTab === 'all' || activeMenuTab === 'chapters') && detectedChapters.length > 0) {
-        listEl.appendChild(el('div', { class: 'sep' }, `Video Bölümleri (${detectedChapters.length} Bölüm · Doğrudan İndir)`));
+        listEl.appendChild(el('div', { class: 'sep' }, `Bölümler (${detectedChapters.length})`));
         for (const ch of detectedChapters) {
           const chClip = { startSec: ch.startSec, endSec: ch.endSec, chapterTitle: ch.title };
           const vq = state.settings.videoQuality || '720p';
@@ -1179,7 +1318,7 @@
           const mp4Btn = el('button', {
             type: 'button',
             class: 'f-btn',
-            style: 'padding:4px 8px;font-size:10.5px;background:rgba(255,82,24,.18);border-color:rgba(255,102,36,.45);color:#ffd2b8;border-radius:6px;cursor:pointer;font-weight:700',
+            style: 'padding:4px 8px;font-size:10.5px;background:rgba(255,82,24,.16);border:1px solid rgba(255,102,36,.42);color:#ffd2b8;border-radius:6px;cursor:pointer;font-weight:700',
             title: `${ch.title} bölümünü Video (${vq}) olarak indir`
           }, 'MP4');
           mp4Btn.addEventListener('click', ev => {
@@ -1190,7 +1329,7 @@
           const mp3Btn = el('button', {
             type: 'button',
             class: 'f-btn',
-            style: 'padding:4px 8px;font-size:10.5px;background:rgba(63,185,80,.18);border-color:rgba(63,185,80,.45);color:#7ee787;border-radius:6px;cursor:pointer;font-weight:700',
+            style: 'padding:4px 8px;font-size:10.5px;background:rgba(63,185,80,.16);border:1px solid rgba(63,185,80,.42);color:#7ee787;border-radius:6px;cursor:pointer;font-weight:700',
             title: `${ch.title} bölümünü MP3 (${aq}) olarak indir`
           }, 'MP3');
           mp3Btn.addEventListener('click', ev => {
@@ -1200,13 +1339,13 @@
           });
           const rowEl = el(
             'div',
-            { class: 'row-btn', style: 'cursor:default' },
-            el('span', { class: 'badge', 'data-tier': 'hd' }, `#${ch.index}`),
+            { class: 'row-btn', style: 'grid-template-columns:3px 1fr auto;cursor:default' },
+            el('span', { class: 'tier-bar', 'data-tier': 'hd' }),
             el(
               'span',
               { class: 'r-main' },
               el('span', { class: 'r-title', title: ch.title }, ch.title),
-              el('span', { class: 'r-sub' }, `${ch.timeRange} · Süre: ${CT.formatDuration(ch.endSec - ch.startSec)}`)
+              el('span', { class: 'r-sub' }, `${ch.timeRange} · ${CT.formatDuration(ch.endSec - ch.startSec)}`)
             ),
             el('span', { style: 'display:inline-flex;gap:4px;flex-shrink:0' }, mp4Btn, mp3Btn)
           );
@@ -1290,10 +1429,6 @@
       chrome.runtime.sendMessage({ action: 'open_folder' }).catch(() => {});
     });
 
-    jobsSel.addEventListener('change', () => {
-      saveSettings({ jobs: normalizeJobs(jobsSel.value) });
-    });
-
     document.addEventListener('click', ev => {
       if (!menuOpen) return;
       if (!host.contains(ev.target) && !ev.target.closest?.(`#${UI_ID}`)) {
@@ -1327,7 +1462,10 @@
     }
 
     function syncSettings() {
-      jobsSel.value = String(normalizeJobs(state.settings.jobs));
+      const curJobs = String(normalizeJobs(state.settings.jobs));
+      for (const b of spdBtns) {
+        b.classList.toggle('active', b.dataset.jobs === curJobs);
+      }
       positionPill();
     }
 
@@ -1898,19 +2036,16 @@
     container.id = UI_ID;
     container.className = 'rt-container';
 
-    const brandMark = svgEl(
-      { width: '14', height: '14', viewBox: '0 0 256 256', fill: 'none' },
-      [
-        ['path', { d: 'M68 54H136C166.928 54 190 75.4903 190 103.5C190 128.42 171.62 147.88 145.8 151.9L184 202H147.5L114 156H98C90.268 156 85 161.268 85 169V202H68V158C68 138.118 82.1177 124 102 124H134C147.255 124 157 115.493 157 103.5C157 91.5066 147.255 83 134 83H98V113.5C85.8 115.6 75.4 121.8 68 131V54Z', fill: 'currentColor' }],
-        ['path', { d: 'M114 91.5L137 104.5L114 117.5V91.5Z', fill: 'currentColor' }]
-      ]
-    );
-
     const dlBtn = el(
       'button',
-      { type: 'button', class: 'rt-btn', title: 'RuviTube: Video, MP3 ve Bölüm İndir' },
-      el('span', { class: 'rt-btn-ico' }, brandMark),
-      el('span', {}, 'İndir ▾')
+      { type: 'button', class: 'rt-btn', title: 'RuviTube — Video, MP3 ve Bölüm İndir', 'aria-label': 'RuviTube İndir' },
+      el('span', { class: 'rt-btn-ico' }, svgEl(
+        { width: '19', height: '19', viewBox: '0 0 256 256', fill: 'none' },
+        [
+          ['path', { d: 'M68 54H136C166.928 54 190 75.4903 190 103.5C190 128.42 171.62 147.88 145.8 151.9L184 202H147.5L114 156H98C90.268 156 85 161.268 85 169V202H68V158C68 138.118 82.1177 124 102 124H134C147.255 124 157 115.493 157 103.5C157 91.5066 147.255 83 134 83H98V113.5C85.8 115.6 75.4 121.8 68 131V54Z', fill: 'currentColor' }],
+          ['path', { d: 'M114 91.5L137 104.5L114 117.5V91.5Z', fill: 'currentColor' }]
+        ]
+      ))
     );
     dlBtn.addEventListener('click', event => {
       event.stopPropagation();

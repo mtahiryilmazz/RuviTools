@@ -71,7 +71,7 @@ async function getSettings() {
     jobs: DEFAULT_JOBS,
     rememberClip: true,
     showStatus: true,
-    showFloatingPill: true
+    showFloatingPill: false
   }, s);
   merged.jobs = normalizeJobs(s.jobs !== undefined ? s.jobs : s.jobsCount);
   return merged;
