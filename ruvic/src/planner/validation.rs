@@ -241,7 +241,11 @@ pub fn is_valid_bitrate(rate: &str) -> bool {
     if trimmed.is_empty() {
         return false;
     }
-    let digits = trimmed.trim_end_matches(['k', 'K', 'm', 'M']);
+    if trimmed.eq_ignore_ascii_case("vbr") || trimmed == "0" {
+        return true;
+    }
+    let lower = trimmed.to_ascii_lowercase();
+    let digits = lower.trim_end_matches("bps").trim_end_matches(['k', 'm']);
     !digits.is_empty()
         && digits.chars().all(|c| c.is_ascii_digit())
         && digits.parse::<u64>().is_ok_and(|v| v > 0)

@@ -4,22 +4,25 @@
   <meta charset="utf-8">
   <title>RuviTube</title>
   <style>
-    :root { --bg:#141414; --panel:#1f1f1f; --line:#333; --text:#f1f1f1; --muted:#a0a0a0; --accent:#cc0000; }
+    :root { --bg:#0d1117; --panel:#161b22; --line:#30363d; --text:#f0f6fc; --muted:#8b949e; --accent:#ff4d1a; --ok:#3fb950; --err:#f85149; }
     * { box-sizing: border-box; }
-    body { width: 320px; margin: 0; background: var(--bg); color: var(--text); font: 13px/1.5 "Segoe UI", Roboto, Arial, sans-serif; }
-    header { display:flex; align-items:center; gap:8px; padding: 12px 14px; border-bottom: 1px solid var(--line); }
+    body { width: 340px; margin: 0; background: var(--bg); color: var(--text); font: 13px/1.5 "Segoe UI", Roboto, Arial, sans-serif; }
+    header { display:flex; align-items:center; gap:8px; padding: 12px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
     header img { width: 20px; height: 20px; }
     header strong { font-size: 14px; font-weight: 600; }
     header span { margin-left: auto; color: var(--muted); font-size: 11px; }
     .body { padding: 12px 14px; }
     h2 { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); margin: 0 0 8px; }
     .job { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; background: var(--panel); }
-    .job .top { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; }
-    .job .top em { font-style: normal; color: var(--muted); }
-    .bar { height: 3px; background: #2e2e2e; border-radius: 999px; margin-top: 6px; overflow: hidden; }
-    .bar span { display: block; height: 100%; background: var(--accent); width: 0; }
-    .job.done .bar span { background: #2ecc71; }
-    .job.failed .bar span { background: #e04b4b; }
+    .job .top { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; }
+    .job .top span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+    .job .top em { font-style: normal; color: var(--muted); font-size: 11px; flex: none; }
+    .job .sub { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .job .sub button { flex: none; padding: 2px 7px; font-size: 10.5px; border-radius: 5px; }
+    .bar { height: 4px; background: #21262d; border-radius: 999px; margin-top: 6px; overflow: hidden; }
+    .bar span { display: block; height: 100%; background: var(--accent); width: 0; transition: width .2s; }
+    .job.done .bar span { background: var(--ok); }
+    .job.failed .bar span { background: var(--err); }
     .empty { color: var(--muted); font-size: 12px; margin-bottom: 10px; }
     .setting-row {
       display: flex; align-items: center; justify-content: space-between; gap: 10px;
@@ -28,17 +31,39 @@
     }
     .setting-row label { color: var(--text); }
     .setting-row select {
-      background: #121212; color: var(--text); border: 1px solid var(--line);
+      background: #0d1117; color: var(--text); border: 1px solid var(--line);
       border-radius: 6px; padding: 4px 8px; font: inherit; min-width: 84px;
     }
     .setting-row select:focus { outline: none; border-color: var(--accent); }
     .actions { display: flex; gap: 8px; }
     button {
-      flex: 1; background: #2b2b2b; color: var(--text); border: 1px solid var(--line);
-      border-radius: 8px; padding: 8px 10px; font: inherit; cursor: pointer;
+      flex: 1; background: #21262d; color: var(--text); border: 1px solid var(--line);
+      border-radius: 8px; padding: 8px 10px; font: inherit; font-size: 12px; cursor: pointer;
     }
-    button:hover { background: #3a3a3a; }
+    button:hover { background: #30363d; }
     .hint { color: var(--muted); font-size: 11.5px; margin: 10px 0 0; }
+    .media-card {
+      border: 1px solid rgba(255, 82, 24, 0.38); border-radius: 10px; padding: 10px;
+      margin-bottom: 10px; background: linear-gradient(160deg, rgba(255, 72, 24, 0.14), var(--panel));
+    }
+    .media-title {
+      font-size: 12.5px; font-weight: 600; color: var(--text); margin-bottom: 8px;
+      display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .quick-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+    .q-btn {
+      display: flex; align-items: center; justify-content: space-between; gap: 6px;
+      padding: 6px 8px; border-radius: 7px; font-size: 11.5px; font-weight: 600;
+      background: #0d1117; border: 1px solid var(--line); color: var(--text);
+    }
+    .q-btn:hover { border-color: var(--accent); background: rgba(255, 82, 24, 0.16); }
+    .q-btn.audio { border-color: rgba(63, 185, 80, 0.45); }
+    .q-btn.audio:hover { border-color: var(--ok); background: rgba(63, 185, 80, 0.15); }
+    .q-tag {
+      font-size: 10px; padding: 1px 5px; border-radius: 4px;
+      background: rgba(255, 82, 24, 0.22); color: #ffd2b8;
+    }
+    .q-btn.audio .q-tag { background: rgba(63, 185, 80, 0.22); color: #aff5b4; }
   </style>
 </head>
 <body>
@@ -48,6 +73,18 @@
     <span id="version"></span>
   </header>
   <div class="body">
+    <div id="activeMedia" class="media-card" hidden>
+      <h2>Aktif YouTube Videosu — Hızlı İndir</h2>
+      <div id="activeTitle" class="media-title"></div>
+      <div class="quick-grid">
+        <button type="button" class="q-btn audio" data-type="MP3" data-quality="320kbps"><span>MP3 320k</span><span class="q-tag">SES</span></button>
+        <button type="button" class="q-btn audio" data-type="MP3" data-quality="192kbps"><span>MP3 192k</span><span class="q-tag">SES</span></button>
+        <button type="button" class="q-btn" data-type="Video" data-quality="best"><span>En İyi Kalite</span><span class="q-tag">MAX</span></button>
+        <button type="button" class="q-btn" data-type="Video" data-quality="h264"><span>MP4 (H.264)</span><span class="q-tag">MP4</span></button>
+        <button type="button" class="q-btn" data-type="Video" data-quality="720p"><span>720p HD</span><span class="q-tag">HD</span></button>
+        <button type="button" class="q-btn audio" data-type="M4A" data-quality="original"><span>Orijinal M4A</span><span class="q-tag">AAC</span></button>
+      </div>
+    </div>
     <h2 data-i18n="popupLast">Son işler</h2>
     <div id="jobs"><div class="empty" data-i18n="popupIdle">Bekleyen indirme yok</div></div>
     <div class="setting-row">
@@ -62,9 +99,9 @@
     </div>
     <div class="actions">
       <button id="options" data-i18n="popupSettings">Ayarlar</button>
-      <button id="downloads" data-i18n="popupDownloads">İndirilenler</button>
+      <button id="openFolder" data-i18n="popupFolder">Klasörü Aç</button>
     </div>
-    <p class="hint" data-i18n="popupOpenYoutube">YouTube'da bir video açın</p>
+    <p class="hint" data-i18n="popupOpenYoutube">YouTube'da videonun sağ üstündeki RuviTube menüsünden kalite veya MP3 seçin</p>
   </div>
   <script src="popup.js"></script>
 </body>

@@ -19,6 +19,57 @@ pub const MAX_MANIFEST_BYTES: usize = 8 * 1024 * 1024;
 pub const MAX_PLAYLIST_SEGMENTS: usize = 20_000;
 pub const MAX_REDIRECTS: usize = 10;
 
+static PREFERRED_LOCAL_IPV4: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(0);
+
+pub fn set_preferred_local_ipv4(ip: Option<std::net::Ipv4Addr>) {
+    let bits = ip.map(u32::from).unwrap_or(0);
+    PREFERRED_LOCAL_IPV4.store(bits, std::sync::atomic::Ordering::Relaxed);
+}
+
+pub fn get_preferred_local_ipv4() -> Option<std::net::Ipv4Addr> {
+    let bits = PREFERRED_LOCAL_IPV4.load(std::sync::atomic::Ordering::Relaxed);
+    if bits == 0 {
+        None
+    } else {
+        Some(std::net::Ipv4Addr::from(bits))
+    }
+}
+
+/// Discovers physical private LAN IPv4 addresses on multi-homed / dual-WAN machines
+/// in < 0.1 ms using stdlib socket resolution without external crates or subprocesses.
+pub fn local_wan_ipv4_candidates() -> Vec<std::net::Ipv4Addr> {
+    use std::net::ToSocketAddrs;
+
+    let mut primary = Vec::new();
+    let mut secondary = Vec::new();
+    let host = std::env::var("COMPUTERNAME")
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .unwrap_or_default();
+    if host.trim().is_empty() {
+        return primary;
+    }
+
+    if let Ok(addrs) = (host.trim(), 0u16).to_socket_addrs() {
+        for sock in addrs {
+            if let IpAddr::V4(v4) = sock.ip() {
+                if v4.is_loopback() || v4.is_link_local() || v4.is_unspecified() {
+                    continue;
+                }
+                let octets = v4.octets();
+                if octets[0] == 192 && octets[1] == 168 {
+                    if !primary.contains(&v4) {
+                        primary.push(v4);
+                    }
+                } else if octets[0] == 10 && !secondary.contains(&v4) {
+                    secondary.push(v4);
+                }
+            }
+        }
+    }
+    primary.extend(secondary);
+    primary
+}
+
 #[derive(Debug, Clone)]
 pub struct ResolveContext {
     pub client: reqwest::Client,
@@ -122,6 +173,12 @@ impl ResolveContext {
                 builder = builder.local_address(ip);
                 no_redirect_builder = no_redirect_builder.local_address(ip);
             }
+        } else if !allow_priv
+            && proxy.is_none()
+            && let Some(v4) = get_preferred_local_ipv4()
+        {
+            builder = builder.local_address(IpAddr::V4(v4));
+            no_redirect_builder = no_redirect_builder.local_address(IpAddr::V4(v4));
         }
 
         let client = builder

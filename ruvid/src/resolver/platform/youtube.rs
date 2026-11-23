@@ -7,8 +7,10 @@ use crate::error::{RuviError, RuviResult};
 use crate::resolver::ResolveContext;
 
 const ANDROID_USER_AGENT: &str = "com.google.android.youtube/20.10.38 (Linux; U; Android 14) gzip";
+const ANDROID_VR_USER_AGENT: &str = "com.google.android.apps.youtube.vr.oculus/1.60.19 (Linux; U; Android 12L; eureka-user Build/SQ3A.220605.009.A1) gzip";
 const IOS_USER_AGENT: &str =
     "com.google.ios.youtube/20.10.4 (iPhone16,2; U; CPU iOS 18_3_2 like Mac OS X;)";
+const TV_EMBED_USER_AGENT: &str = "Mozilla/5.0 (ChromiumStylePlatform) Cobalt/Version";
 const WATCH_USER_AGENT: &str = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36";
 
 pub fn is_youtube_url(url: &Url) -> bool {
@@ -48,14 +50,24 @@ pub fn extract_video_id(url: &Url) -> Option<String> {
 }
 
 /// Resolves YouTube media from already-fetched HTML page.
-/// 1. Checks if HTML contains embedded `ytInitialPlayerResponse`.
-/// 2. If not, queries YouTube's Innertube `/youtubei/v1/player` JSON API
-///    with native Android & iOS client contexts.
+/// 1. Queries YouTube's Innertube `/youtubei/v1/player` JSON API across resilient mobile/VR/TV profiles.
+/// 2. Verifies non-loopback `googlevideo.com` URLs do not immediately return HTTP 403 before accepting a profile.
+/// 3. Falls back to HTML-embedded `ytInitialPlayerResponse`.
 pub async fn resolve_youtube_from_html(
     ctx: &ResolveContext,
     raw_url: &str,
     final_url: &Url,
     html: &str,
+) -> RuviResult<Option<MediaSource>> {
+    resolve_youtube_from_html_skipping(ctx, raw_url, final_url, html, 0).await
+}
+
+pub async fn resolve_youtube_from_html_skipping(
+    ctx: &ResolveContext,
+    raw_url: &str,
+    final_url: &Url,
+    html: &str,
+    skip_profiles: usize,
 ) -> RuviResult<Option<MediaSource>> {
     let parsed_raw = ctx.validate_url(raw_url).ok();
     let is_yt = is_youtube_url(final_url)
@@ -72,7 +84,6 @@ pub async fn resolve_youtube_from_html(
         extract_video_id(final_url).or_else(|| parsed_raw.as_ref().and_then(extract_video_id));
 
     if let Some(video_id) = video_id {
-        let visitor_data = extract_visitor_data(html);
         let innertube_base = Url::parse(&format!(
             "{}://{}{}",
             final_url.scheme(),
@@ -85,27 +96,53 @@ pub async fn resolve_youtube_from_html(
         .unwrap_or_else(|_| final_url.clone());
 
         if let Ok(api_url) = innertube_base.join("/youtubei/v1/player?prettyPrint=false") {
-            // Try IOS client first: iOS provides pristine adaptive 1080p/4K and 140 AAC streams
-            // that download without bot blocks or HTTP 403.
-            // iOS client must NOT receive desktop web visitor_data, which causes Google 403 Forbidden.
-            // Fall back to Android client for environments where iOS is restricted.
-            for profile in [InnertubeClient::Ios, InnertubeClient::Android] {
-                let v_data = match profile {
-                    InnertubeClient::Ios => None,
-                    InnertubeClient::Android => visitor_data.as_deref(),
-                };
+            let profiles = [
+                InnertubeClient::AndroidVr,
+                InnertubeClient::Ios,
+                InnertubeClient::Android,
+                InnertubeClient::TvEmbedded,
+            ];
+            let mut playable_sources: Vec<(InnertubeClient, MediaSource)> = Vec::new();
+            for profile in profiles {
+                // Never send desktop web visitor_data to mobile/VR/TV Innertube clients,
+                // as mismatched visitorData triggers Google HTTP 403 on googlevideo.com.
                 if let Ok(player_json) =
-                    query_innertube_player(ctx, &api_url, &video_id, v_data, profile).await
-                {
-                    if let Ok(Some(source)) = parse_player_response_json(
+                    query_innertube_player(ctx, &api_url, &video_id, None, profile).await
+                    && let Ok(Some(source)) = parse_player_response_json(
                         raw_url,
                         &innertube_base,
                         &player_json,
                         Some(profile.user_agent()),
-                    ) {
+                    )
+                {
+                    // Fast path: on primary attempt (skip_profiles == 0), return AndroidVr
+                    // immediately without extra network probes; for svpuc=1 fallback profiles
+                    // (Ios / Android), verify bytes=0-0 is not 403 so blocked WAN routes fail fast.
+                    if skip_profiles == 0 && profile == InnertubeClient::AndroidVr {
                         return Ok(Some(source));
                     }
+                    playable_sources.push((profile, source));
                 }
+            }
+            if !playable_sources.is_empty() {
+                let start_idx = skip_profiles % playable_sources.len();
+                for offset in 0..playable_sources.len() {
+                    let idx = (start_idx + offset) % playable_sources.len();
+                    let (profile, ref source) = playable_sources[idx];
+                    if probe_stream_not_forbidden(ctx, source, profile.user_agent()).await {
+                        return Ok(Some(source.clone()));
+                    }
+                }
+                let is_loopback = final_url.host_str().is_some_and(|h| {
+                    h.eq_ignore_ascii_case("localhost") || h == "127.0.0.1" || h == "::1"
+                });
+                if !is_loopback {
+                    return Err(RuviError::Network(
+                        "HTTP 403: all Innertube stream probes forbidden on current network route"
+                            .to_string(),
+                    ));
+                }
+                return Ok(Some(playable_sources.swap_remove(start_idx).1));
             }
         }
     }
@@ -123,10 +160,35 @@ pub async fn resolve_youtube_from_html(
 /// 1. Fetches watch HTML (supports offline/mock `ytInitialPlayerResponse` fixtures too).
 /// 2. Invokes `resolve_youtube_from_html`.
 pub async fn resolve_youtube_url(ctx: &ResolveContext, raw_url: &str) -> RuviResult<MediaSource> {
+    resolve_youtube_url_skipping(ctx, raw_url, 0).await
+}
+
+pub async fn resolve_youtube_url_skipping(
+    ctx: &ResolveContext,
+    raw_url: &str,
+    skip_profiles: usize,
+) -> RuviResult<MediaSource> {
     let parsed = ctx.validate_url(raw_url)?;
+    let is_loopback = parsed
+        .host_str()
+        .is_some_and(|h| h.eq_ignore_ascii_case("localhost") || h == "127.0.0.1" || h == "::1");
+
+    // Fast path for real YouTube URLs: query Innertube `/youtubei/v1/player` directly by video_id
+    // without downloading the ~850 KB desktop watch HTML page first (~1000ms saved).
+    if !is_loopback
+        && is_youtube_url(&parsed)
+        && extract_video_id(&parsed).is_some()
+        && let Ok(Some(source)) =
+            resolve_youtube_from_html_skipping(ctx, raw_url, &parsed, "", skip_profiles).await
+    {
+        return Ok(source);
+    }
+
     let (html, final_url, _) = fetch_watch_html(ctx, parsed.as_str()).await?;
 
-    if let Some(source) = resolve_youtube_from_html(ctx, raw_url, &final_url, &html).await? {
+    if let Some(source) =
+        resolve_youtube_from_html_skipping(ctx, raw_url, &final_url, &html, skip_profiles).await?
+    {
         return Ok(source);
     }
 
@@ -135,22 +197,89 @@ pub async fn resolve_youtube_url(ctx: &ResolveContext, raw_url: &str) -> RuviRes
     ))
 }
 
-#[derive(Debug, Clone, Copy)]
+async fn probe_single_stream_url(
+    ctx: &ResolveContext,
+    stream: Option<&MediaStream>,
+    user_agent: &str,
+) -> bool {
+    let Some(stream) = stream else {
+        return true;
+    };
+    let StreamPayload::DirectHttp { ref url, .. } = stream.payload else {
+        return true;
+    };
+    let Ok(parsed) = Url::parse(url) else {
+        return false;
+    };
+    if let Some(host) = parsed.host_str() {
+        let lower = host.to_ascii_lowercase();
+        if lower == "127.0.0.1" || lower == "localhost" || lower == "::1" {
+            return true;
+        }
+    }
+    match ctx
+        .client
+        .get(parsed)
+        .header(reqwest::header::USER_AGENT, user_agent)
+        .header(reqwest::header::RANGE, "bytes=0-0")
+        .send()
+        .await
+    {
+        Ok(resp) => {
+            let code = resp.status().as_u16();
+            code != 403 && code != 401
+        }
+        Err(_) => false,
+    }
+}
+
+async fn probe_stream_not_forbidden(
+    ctx: &ResolveContext,
+    source: &MediaSource,
+    user_agent: &str,
+) -> bool {
+    let candidate = source
+        .streams
+        .iter()
+        .find(|s| s.id == "itag-140" || s.kind == StreamKind::Audio)
+        .or_else(|| source.streams.first());
+    if candidate.is_none() {
+        return false;
+    }
+    probe_single_stream_url(ctx, candidate, user_agent).await
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum InnertubeClient {
-    Android,
+    AndroidVr,
     Ios,
+    Android,
+    TvEmbedded,
 }
 
 impl InnertubeClient {
     fn user_agent(self) -> &'static str {
         match self {
-            Self::Android => ANDROID_USER_AGENT,
+            Self::AndroidVr => ANDROID_VR_USER_AGENT,
             Self::Ios => IOS_USER_AGENT,
+            Self::Android => ANDROID_USER_AGENT,
+            Self::TvEmbedded => TV_EMBED_USER_AGENT,
         }
     }
 
     fn client_context(self, visitor_data: Option<&str>) -> Value {
         let mut client = match self {
+            Self::AndroidVr => json!({
+                "clientName": "ANDROID_VR",
+                "clientVersion": "1.60.19",
+                "deviceMake": "Oculus",
+                "deviceModel": "Quest 3",
+                "osName": "Android",
+                "osVersion": "12L",
+                "androidSdkVersion": 32,
+                "hl": "en",
+                "gl": "US"
+            }),
             Self::Android => json!({
                 "clientName": "ANDROID",
                 "clientVersion": "20.10.38",
@@ -172,6 +301,12 @@ impl InnertubeClient {
                 "hl": "en",
                 "gl": "US"
             }),
+            Self::TvEmbedded => json!({
+                "clientName": "TVHTML5_SIMPLY_EMBEDDED_PLAYER",
+                "clientVersion": "2.0",
+                "hl": "en",
+                "gl": "US"
+            }),
         };
         if let Some(vd) = visitor_data
             && let Some(obj) = client.as_object_mut()
@@ -179,6 +314,13 @@ impl InnertubeClient {
             obj.insert("visitorData".to_string(), Value::String(vd.to_string()));
         }
         client
+    }
+
+    fn third_party(self) -> Option<Value> {
+        match self {
+            Self::TvEmbedded => Some(json!({ "embedUrl": "https://www.youtube.com/" })),
+            _ => None,
+        }
     }
 }
 
@@ -226,11 +368,19 @@ async fn query_innertube_player(
     visitor_data: Option<&str>,
     profile: InnertubeClient,
 ) -> RuviResult<Value> {
+    let mut context = json!({
+        "client": profile.client_context(visitor_data)
+    });
+    if let Some(tp) = profile.third_party()
+        && let Some(obj) = context.as_object_mut()
+    {
+        obj.insert("thirdParty".to_string(), tp);
+    }
     let payload = json!({
         "videoId": video_id,
-        "context": {
-            "client": profile.client_context(visitor_data)
-        }
+        "contentCheckOk": true,
+        "racyCheckOk": true,
+        "context": context
     });
 
     let mut req = ctx
@@ -937,4 +1087,28 @@ fn unescape_xml_entities(s: &str) -> String {
         .replace("&quot;", "\"")
         .replace("&#39;", "'")
         .replace("&apos;", "'")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_innertube_clients_omit_visitor_data_by_default_and_include_tv_third_party() {
+        let vr = InnertubeClient::AndroidVr.client_context(None);
+        assert_eq!(vr["clientName"], "ANDROID_VR");
+        assert!(vr.get("visitorData").is_none());
+
+        let ios = InnertubeClient::Ios.client_context(None);
+        assert_eq!(ios["clientName"], "IOS");
+        assert!(ios.get("visitorData").is_none());
+
+        let android = InnertubeClient::Android.client_context(None);
+        assert_eq!(android["clientName"], "ANDROID");
+        assert!(android.get("visitorData").is_none());
+
+        let tv = InnertubeClient::TvEmbedded.client_context(None);
+        assert_eq!(tv["clientName"], "TVHTML5_SIMPLY_EMBEDDED_PLAYER");
+        assert!(InnertubeClient::TvEmbedded.third_party().is_some());
+    }
 }

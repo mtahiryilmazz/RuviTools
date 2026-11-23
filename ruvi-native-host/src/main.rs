@@ -1,23 +1,34 @@
+use std::fs::OpenOptions;
 use std::io::{self, Read, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(feature = "mimalloc")]
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use ruvic::backend::native::NativeMediaBackend;
+use ruvic::backend::native::audio_transcode::{
+    parse_smart_title_metadata, write_id3v23_to_mp3_file,
+};
+use ruvic::backend::native::dual_mux::inject_fmp4_itunes_metadata_file;
 use ruvic::config::RuvicConfig;
 use ruvic::operations::extract_audio::{ExtractAudioRequest, execute_extract_audio};
+use ruvic::operations::remux::{RemuxRequest, execute_remux};
 use ruvic::operations::trim::{TrimRequest, execute_trim};
 use ruvid::config::RuvidConfig;
 use ruvid::domain::download_job::DownloadJob;
-use ruvid::downloader::execute_download;
+use ruvid::downloader::execute_download_with_progress;
+use ruvid::resolver::ResolveContext;
+use ruvid::resolver::registry::ResolverRegistry;
 use ruvid::storage::sanitize_filename;
+use ruvid::telemetry::ProgressCallback;
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 const MAX_MESSAGE_BYTES: usize = 1024 * 1024;
+const MAX_LOG_BYTES: u64 = 2 * 1024 * 1024;
 const DEFAULT_JOBS: usize = 4;
 const MIN_JOBS: usize = 1;
 const MAX_JOBS: usize = 16;
@@ -28,6 +39,8 @@ struct ClipSpec {
     start_sec: f64,
     #[serde(rename = "endSec")]
     end_sec: f64,
+    #[serde(default, rename = "chapterTitle")]
+    chapter_title: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -48,6 +61,10 @@ struct IncomingMessage {
     jobs: Option<usize>,
     #[serde(default)]
     clip: Option<ClipSpec>,
+    #[serde(default)]
+    channel: String,
+    #[serde(default)]
+    title: String,
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +88,77 @@ impl Default for HostRuntimeConfig {
 
 fn resolve_jobs(jobs: Option<usize>) -> usize {
     jobs.unwrap_or(DEFAULT_JOBS).clamp(MIN_JOBS, MAX_JOBS)
+}
+
+fn log_path() -> PathBuf {
+    let local = std::env::var_os("LOCALAPPDATA")
+        .map(PathBuf::from)
+        .unwrap_or_else(std::env::temp_dir);
+    local.join("RuviTube").join("nativehost.log")
+}
+
+fn format_utc_timestamp() -> String {
+    let secs = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or(0);
+    let days = (secs / 86_400) as i64;
+    let rem = secs % 86_400;
+    let hh = rem / 3_600;
+    let mm = (rem % 3_600) / 60;
+    let ss = rem % 60;
+
+    // Howard Hinnant's civil-from-days algorithm
+    let z = days + 719_468;
+    let era = if z >= 0 { z } else { z - 146_096 } / 146_097;
+    let doe = (z - era * 146_097) as u64;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146_096) / 365;
+    let y = (yoe as i64) + era * 400;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let year = y + i64::from(m <= 2);
+    format!("{year:04}-{m:02}-{d:02}T{hh:02}:{mm:02}:{ss:02}Z")
+}
+
+fn redact_query_secrets(text: &str) -> String {
+    let mut out = text.to_string();
+    for key in ["sig=", "lsig=", "signature="] {
+        while let Some(pos) = out.find(key) {
+            let val_start = pos + key.len();
+            let rest = &out[val_start..];
+            if rest.starts_with("REDACTED") {
+                break;
+            }
+            let val_end = rest
+                .find(['&', ' ', '"', '\n', '\r'])
+                .map(|i| val_start + i)
+                .unwrap_or(out.len());
+            out.replace_range(val_start..val_end, "REDACTED");
+        }
+    }
+    out
+}
+
+fn log_event(event: &str) {
+    let path = log_path();
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    if let Ok(meta) = std::fs::metadata(&path)
+        && meta.len() > MAX_LOG_BYTES
+    {
+        let _ = std::fs::write(&path, b"");
+    }
+    if let Ok(mut f) = OpenOptions::new().create(true).append(true).open(&path) {
+        let line = format!(
+            "{} {}\n",
+            format_utc_timestamp(),
+            redact_query_secrets(event)
+        );
+        let _ = f.write_all(line.as_bytes());
+    }
 }
 
 fn write_native_frame<W: Write>(writer: &mut W, value: &Value) -> io::Result<()> {
@@ -109,6 +197,13 @@ fn download_root() -> PathBuf {
     let profile = std::env::var_os("USERPROFILE")
         .map(PathBuf::from)
         .unwrap_or_else(|| PathBuf::from("."));
+    profile.join("Downloads").join("RuviTube")
+}
+
+fn legacy_download_root() -> PathBuf {
+    let profile = std::env::var_os("USERPROFILE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."));
     profile.join("Downloads").join("GeTube")
 }
 
@@ -116,17 +211,37 @@ fn staging_root() -> PathBuf {
     let local = std::env::var_os("LOCALAPPDATA")
         .map(PathBuf::from)
         .unwrap_or_else(std::env::temp_dir);
-    local.join("GeTube").join("staging")
+    local.join("RuviTube").join("staging")
 }
 
 fn is_allowed_youtube_url(url: &str) -> bool {
     if url.is_empty() || url.len() > 2048 {
         return false;
     }
-    url.starts_with("https://www.youtube.com/watch?")
-        && url[30..].chars().all(|c| {
-            c.is_ascii_alphanumeric() || matches!(c, '_' | '-' | '=' | '&' | '%' | '.' | ':' | '+')
-        })
+    let without_frag = url.split('#').next().unwrap_or(url);
+    let allowed_prefixes = [
+        "https://www.youtube.com/watch?",
+        "https://m.youtube.com/watch?",
+        "https://music.youtube.com/watch?",
+        "https://www.youtube.com/shorts/",
+        "https://m.youtube.com/shorts/",
+        "https://www.youtube.com/live/",
+        "https://www.youtube.com/embed/",
+        "https://youtu.be/",
+    ];
+    let Some(rest) = allowed_prefixes
+        .iter()
+        .find_map(|pfx| without_frag.strip_prefix(pfx))
+    else {
+        return false;
+    };
+    if rest.is_empty() {
+        return false;
+    }
+    rest.chars().all(|c| {
+        c.is_ascii_alphanumeric()
+            || matches!(c, '_' | '-' | '=' | '&' | '%' | '.' | ':' | '+' | '/' | '?')
+    })
 }
 
 fn is_allowed_request_url(url: &str, allow_local_test_url: bool) -> bool {
@@ -172,17 +287,154 @@ fn file_stamp(seconds: f64) -> String {
     format!("{h:02}-{m:02}-{s:02}")
 }
 
+fn normalize_mp3_bitrate_arg(quality: &str) -> String {
+    let lower = quality.trim().to_ascii_lowercase();
+    if lower == "vbr" || lower == "mp3:0" || lower == "0" {
+        return "vbr".to_string();
+    }
+    if lower.starts_with("320") {
+        "320k".to_string()
+    } else if lower.starts_with("256") {
+        "256k".to_string()
+    } else if lower.starts_with("128") {
+        "128k".to_string()
+    } else {
+        "192k".to_string()
+    }
+}
+
 fn quality_tag(media_type: &str, quality: &str) -> String {
     if media_type.eq_ignore_ascii_case("MP3") {
-        if quality == "320kbps" {
+        let lower = quality.trim().to_ascii_lowercase();
+        if lower == "vbr" || lower == "mp3:0" {
+            "VBR".to_string()
+        } else if lower.starts_with("320") {
             "320kbps".to_string()
+        } else if lower.starts_with("256") {
+            "256kbps".to_string()
+        } else if lower.starts_with("128") {
+            "128kbps".to_string()
         } else {
             "192kbps".to_string()
         }
+    } else if media_type.eq_ignore_ascii_case("M4A") {
+        "M4A".to_string()
+    } else if media_type.eq_ignore_ascii_case("OPUS")
+        || media_type.eq_ignore_ascii_case("WEBM-AUDIO")
+    {
+        "Opus".to_string()
+    } else if media_type.eq_ignore_ascii_case("WAV") {
+        "WAV".to_string()
+    } else if media_type.eq_ignore_ascii_case("AAC") {
+        "AAC".to_string()
     } else if quality.is_empty() || quality == "best" {
         "En iyi".to_string()
+    } else if quality.eq_ignore_ascii_case("h264") || quality.eq_ignore_ascii_case("mp4-h264") {
+        "H264-MP4".to_string()
+    } else if let Some((_itag, fb)) = quality.split_once('|') {
+        fb.split(':').next().unwrap_or(fb).to_string()
     } else {
         quality.to_string()
+    }
+}
+
+fn resolve_video_format_spec(quality: &str) -> String {
+    let q = quality.trim();
+    if q.is_empty() || q.eq_ignore_ascii_case("best") {
+        return "best".to_string();
+    }
+    let lower = q.to_ascii_lowercase();
+    if lower == "h264" || lower == "mp4-h264" {
+        return "h264".to_string();
+    }
+    if is_valid_resolution_spec(&lower) {
+        return lower;
+    }
+    if is_valid_itag_spec(&lower) {
+        return lower;
+    }
+    // Composite `itag-<id>|<height>p[60][:mp4|webm]`
+    if let Some((primary, fallback)) = lower.split_once('|') {
+        let (res, cont) = match fallback.split_once(':') {
+            Some((r, c)) => (r, Some(c)),
+            None => (fallback, None),
+        };
+        let cont_ok = cont.is_none_or(|c| c == "mp4" || c == "webm");
+        if is_valid_itag_spec(primary) && is_valid_resolution_spec(res) && cont_ok {
+            return lower;
+        }
+    }
+    "best".to_string()
+}
+
+fn is_valid_resolution_spec(s: &str) -> bool {
+    let base = s.strip_suffix("60").unwrap_or(s);
+    matches!(
+        base,
+        "4320p" | "2160p" | "1440p" | "1080p" | "720p" | "480p" | "360p" | "240p" | "144p"
+    )
+}
+
+fn is_valid_itag_spec(s: &str) -> bool {
+    let Some(rest) = s.strip_prefix("itag-") else {
+        return false;
+    };
+    let mut parts = rest.splitn(2, '-');
+    let num = parts.next().unwrap_or("");
+    let suffix_ok = parts
+        .next()
+        .is_none_or(|sfx| !sfx.is_empty() && sfx.chars().all(|c| c.is_ascii_alphanumeric()));
+    !num.is_empty() && num.chars().all(|c| c.is_ascii_digit()) && suffix_ok
+}
+
+async fn fetch_youtube_thumbnail_bytes(raw_url: &str, allow_private_net: bool) -> Option<Vec<u8>> {
+    let parsed = ruvid::resolver::validate_url_security(
+        &ruvid::resolver::ResolveContext::build(
+            "RuviTools/2.1",
+            4,
+            5,
+            None,
+            &[],
+            allow_private_net,
+            1,
+        )
+        .ok()?
+        .validate_url(raw_url)
+        .ok()?,
+        allow_private_net,
+    )
+    .ok()
+    .and_then(|()| {
+        ruvid::resolver::ResolveContext::build(
+            "RuviTools/2.1",
+            4,
+            5,
+            None,
+            &[],
+            allow_private_net,
+            1,
+        )
+        .ok()
+    })?;
+    let u = parsed.validate_url(raw_url).ok()?;
+    if !ruvid::resolver::platform::youtube::is_youtube_url(&u) {
+        return None;
+    }
+    let host = u.host_str().unwrap_or("");
+    if host.eq_ignore_ascii_case("localhost") || host == "127.0.0.1" || host == "::1" {
+        return None;
+    }
+    let vid = ruvid::resolver::platform::youtube::extract_video_id(&u)?;
+    let thumb_url = format!("https://i.ytimg.com/vi/{vid}/hqdefault.jpg");
+    let resp = parsed.client.get(&thumb_url).send().await.ok()?;
+    if !resp.status().is_success() {
+        return None;
+    }
+    let bytes = resp.bytes().await.ok()?;
+    if bytes.len() >= 64 && bytes.len() <= 2 * 1024 * 1024 {
+        Some(bytes.to_vec())
+    } else {
+        None
     }
 }
 
@@ -190,22 +442,143 @@ fn validate_download_path(path_str: &str) -> Result<PathBuf, String> {
     if path_str.trim().is_empty() {
         return Err("Dosya yolu boş.".to_string());
     }
-    let root = download_root();
-    let _ = std::fs::create_dir_all(&root);
-    let canon_root = std::fs::canonicalize(&root).unwrap_or(root);
+    let root_new = download_root();
+    let root_old = legacy_download_root();
+    let _ = std::fs::create_dir_all(&root_new);
+    let canon_new = std::fs::canonicalize(&root_new).unwrap_or(root_new);
+    let canon_old = std::fs::canonicalize(&root_old).unwrap_or(root_old);
     let canon_target =
         std::fs::canonicalize(path_str).map_err(|_| "İndirilen dosya bulunamadı.".to_string())?;
-    if !canon_target.starts_with(&canon_root) {
-        return Err("Yalnızca GeTube indirme klasöründeki dosyalar açılabilir.".to_string());
+    if !canon_target.starts_with(&canon_new) && !canon_target.starts_with(&canon_old) {
+        return Err("Yalnızca RuviTube indirme klasöründeki dosyalar açılabilir.".to_string());
     }
     Ok(canon_target)
+}
+
+async fn handle_probe_job<W: Write>(
+    msg: IncomingMessage,
+    out: Arc<Mutex<W>>,
+    cfg: HostRuntimeConfig,
+) {
+    let job_id = msg.job_id.clone();
+    if !is_valid_job_id(&job_id) || !is_allowed_request_url(&msg.url, cfg.allow_local_test_url) {
+        send_native_message(
+            &out,
+            &json!({
+                "jobId": job_id,
+                "action": "probe_result",
+                "done": true,
+                "ok": false,
+                "error": "Geçersiz istek veya YouTube adresi."
+            }),
+        );
+        return;
+    }
+
+    log_event(&format!("PROBE_START jobId={job_id} url={}", msg.url));
+    let ruvid_cfg = RuvidConfig::default();
+    let ctx = match ResolveContext::build(
+        &ruvid_cfg.network.user_agent,
+        ruvid_cfg.network.connect_timeout_seconds,
+        20,
+        None,
+        &[],
+        cfg.allow_private_net,
+        2,
+    ) {
+        Ok(c) => c,
+        Err(e) => {
+            log_event(&format!("PROBE_ERR jobId={job_id} err={e}"));
+            send_native_message(
+                &out,
+                &json!({
+                    "jobId": job_id,
+                    "action": "probe_result",
+                    "done": true,
+                    "ok": false,
+                    "error": e.to_string()
+                }),
+            );
+            return;
+        }
+    };
+
+    match ResolverRegistry::resolve(&ctx, &msg.url).await {
+        Ok(source) => {
+            let streams: Vec<Value> = source
+                .streams
+                .iter()
+                .map(|s| {
+                    let total_bytes = match &s.payload {
+                        ruvid::domain::stream::StreamPayload::DirectHttp {
+                            total_bytes, ..
+                        } => *total_bytes,
+                        _ => None,
+                    };
+                    json!({
+                        "id": s.id,
+                        "kind": format!("{:?}", s.kind).to_ascii_lowercase(),
+                        "container": s.container,
+                        "width": s.width,
+                        "height": s.height,
+                        "fps": s.frame_rate,
+                        "codecs": s.codecs,
+                        "bandwidth_bps": s.bandwidth_bps,
+                        "total_bytes": total_bytes,
+                        "language": s.language,
+                    })
+                })
+                .collect();
+            let chapters: Vec<Value> = source
+                .chapters
+                .iter()
+                .map(|c| {
+                    json!({
+                        "title": c.title,
+                        "startSec": c.start_seconds,
+                        "endSec": c.end_seconds,
+                    })
+                })
+                .collect();
+            log_event(&format!(
+                "PROBE_OK jobId={job_id} streams={} chapters={}",
+                streams.len(),
+                chapters.len()
+            ));
+            send_native_message(
+                &out,
+                &json!({
+                    "jobId": job_id,
+                    "action": "probe_result",
+                    "done": true,
+                    "ok": true,
+                    "title": source.title,
+                    "streams": streams,
+                    "chapters": chapters
+                }),
+            );
+        }
+        Err(e) => {
+            log_event(&format!("PROBE_ERR jobId={job_id} err={e}"));
+            send_native_message(
+                &out,
+                &json!({
+                    "jobId": job_id,
+                    "action": "probe_result",
+                    "done": true,
+                    "ok": false,
+                    "error": e.to_string()
+                }),
+            );
+        }
+    }
 }
 
 async fn handle_download_job(msg: IncomingMessage, out: Arc<Mutex<io::Stdout>>) {
     handle_download_job_with_config(msg, out, HostRuntimeConfig::default()).await;
 }
 
-async fn handle_download_job_with_config<W: Write>(
+async fn handle_download_job_with_config<W: Write + Send + 'static>(
     msg: IncomingMessage,
     out: Arc<Mutex<W>>,
     cfg: HostRuntimeConfig,
@@ -259,25 +632,50 @@ async fn handle_download_job_with_config<W: Write>(
     }
 
     let jobs = resolve_jobs(msg.jobs);
+    log_event(&format!(
+        "DOWNLOAD_START jobId={job_id} type={} quality={} jobs={jobs} clip={:?}",
+        msg.media_type,
+        msg.quality,
+        msg.clip.as_ref().map(|c| (c.start_sec, c.end_sec))
+    ));
 
     send_native_message(
         &out,
         &json!({
             "jobId": job_id,
-            "percent": 15,
+            "percent": 10,
             "jobs": jobs,
-            "status": format!("ruvid saf Rust motoru ile paralel indiriliyor (--jobs {jobs})...")
+            "status": format!("ruvid saf Rust motoru bağlanıyor (--jobs {jobs})...")
         }),
     );
 
-    let is_audio = msg.media_type.eq_ignore_ascii_case("MP3");
+    let is_mp3 = msg.media_type.eq_ignore_ascii_case("MP3");
+    let is_m4a = msg.media_type.eq_ignore_ascii_case("M4A");
+    let is_aac = msg.media_type.eq_ignore_ascii_case("AAC");
+    let is_wav = msg.media_type.eq_ignore_ascii_case("WAV");
+    let is_opus = msg.media_type.eq_ignore_ascii_case("OPUS")
+        || msg.media_type.eq_ignore_ascii_case("WEBM-AUDIO");
+    let is_audio = is_mp3 || is_m4a || is_aac || is_wav || is_opus;
+
     let tag = quality_tag(&msg.media_type, &msg.quality);
     let final_tag = match msg.clip {
-        Some(ref c) => format!(
-            "clip {}--{}",
-            file_stamp(c.start_sec),
-            file_stamp(c.end_sec)
-        ),
+        Some(ref c) => {
+            let base = format!(
+                "clip {}--{}",
+                file_stamp(c.start_sec),
+                file_stamp(c.end_sec)
+            );
+            if let Some(ref chap) = c.chapter_title {
+                let clean_chap: String = sanitize_filename(chap).chars().take(40).collect();
+                if clean_chap.is_empty() {
+                    base
+                } else {
+                    format!("{clean_chap} [{base}]")
+                }
+            } else {
+                base
+            }
+        }
         None => tag,
     };
 
@@ -286,13 +684,14 @@ async fn handle_download_job_with_config<W: Write>(
     let final_dir = cfg.download_dir;
     let _ = std::fs::create_dir_all(&final_dir);
 
-    let format_spec = if is_audio {
+    let format_spec = if is_m4a || is_aac {
+        "m4a".to_string()
+    } else if is_opus {
+        "opus".to_string()
+    } else if is_audio {
         "bestaudio".to_string()
     } else {
-        match msg.quality.as_str() {
-            "1080p" | "720p" | "480p" => msg.quality.clone(),
-            _ => "best".to_string(),
-        }
+        resolve_video_format_spec(&msg.quality)
     };
 
     let raw_template = job_staging.join("%(title)s.%(ext)s");
@@ -302,7 +701,7 @@ async fn handle_download_job_with_config<W: Write>(
         output_template: Some(raw_template),
         format_spec,
         jobs,
-        resume: true,
+        resume: false,
         overwrite: true,
         limit_rate: None,
         retry_count: 3,
@@ -324,24 +723,74 @@ async fn handle_download_job_with_config<W: Write>(
         allow_private_net: cfg.allow_private_net,
     };
 
-    let outcome = match execute_download(&ruvid_cfg, dl_job, false).await {
-        Ok(o) => o,
-        Err(e) => {
-            send_native_message(
-                &out,
-                &json!({
-                    "jobId": job_id,
-                    "percent": 0,
-                    "done": true,
-                    "ok": false,
-                    "status": "İndirme başarısız",
-                    "error": e.to_string()
-                }),
-            );
-            let _ = std::fs::remove_dir_all(&job_staging);
-            return;
-        }
-    };
+    let out_cb = Arc::clone(&out);
+    let job_id_cb = job_id.clone();
+    let dl_started = Instant::now();
+    let progress_cb: ProgressCallback = Arc::new(move |downloaded, total| {
+        let elapsed_s = dl_started.elapsed().as_secs_f64().max(0.05);
+        let speed_mb = (downloaded as f64 / (1024.0 * 1024.0)) / elapsed_s;
+        let dl_mb = downloaded as f64 / (1024.0 * 1024.0);
+        let (pct, status) = match total {
+            Some(tot) if tot > 0 => {
+                let tot_mb = tot as f64 / (1024.0 * 1024.0);
+                let frac = (downloaded as f64 / tot as f64).clamp(0.0, 1.0);
+                let p = 12 + (frac * 68.0).round() as u64;
+                (
+                    p.min(80),
+                    format!("İndiriliyor: {dl_mb:.1} / {tot_mb:.1} MB ({speed_mb:.1} MB/sn)"),
+                )
+            }
+            _ => (
+                35,
+                format!("İndiriliyor: {dl_mb:.1} MB ({speed_mb:.1} MB/sn)"),
+            ),
+        };
+        send_native_message(
+            &out_cb,
+            &json!({
+                "jobId": job_id_cb,
+                "percent": pct,
+                "jobs": jobs,
+                "speed": format!("{speed_mb:.1} MB/s"),
+                "status": status
+            }),
+        );
+    });
+
+    let thumb_url_clone = msg.url.clone();
+    let allow_priv = cfg.allow_private_net;
+    let thumb_task =
+        tokio::spawn(
+            async move { fetch_youtube_thumbnail_bytes(&thumb_url_clone, allow_priv).await },
+        );
+
+    let outcome =
+        match execute_download_with_progress(&ruvid_cfg, dl_job, false, Some(progress_cb)).await {
+            Ok(o) => o,
+            Err(e) => {
+                thumb_task.abort();
+                log_event(&format!("DOWNLOAD_FAILED jobId={job_id} err={e}"));
+                send_native_message(
+                    &out,
+                    &json!({
+                        "jobId": job_id,
+                        "percent": 0,
+                        "done": true,
+                        "ok": false,
+                        "status": "İndirme başarısız",
+                        "error": e.to_string()
+                    }),
+                );
+                let _ = std::fs::remove_dir_all(&job_staging);
+                return;
+            }
+        };
+    let cover_bytes = thumb_task.await.ok().flatten();
+
+    log_event(&format!(
+        "DOWNLOAD_RES jobId={job_id} stream={} bytes={} path={}",
+        outcome.stream_id, outcome.bytes_downloaded, outcome.output_path
+    ));
 
     let mut working_path = PathBuf::from(&outcome.output_path);
     let mut clean_title = sanitize_filename(&outcome.title);
@@ -352,16 +801,31 @@ async fn handle_download_job_with_config<W: Write>(
     let backend = NativeMediaBackend::new();
     let ruvic_cfg = RuvicConfig::default();
 
-    if let Some(ref c) = msg.clip {
+    let clip_start_str = msg.clip.as_ref().map(|c| format!("{:.3}", c.start_sec));
+    let clip_dur = msg
+        .clip
+        .as_ref()
+        .map(|c| (c.end_sec - c.start_sec).max(0.1));
+
+    // For video/M4A/AAC clips, trim container directly first; for MP3/WAV, decode+slice in one pass!
+    if !is_mp3
+        && !is_wav
+        && let Some(ref c) = msg.clip
+    {
         send_native_message(
             &out,
             &json!({
                 "jobId": job_id,
-                "percent": 75,
+                "percent": 82,
                 "status": "ruvic saf Rust medya motoru ile kesit kırpılıyor..."
             }),
         );
-        let trimmed_path = job_staging.join(format!("{clean_title} [{final_tag}].mp4"));
+        let src_ext = working_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .filter(|e| !e.is_empty())
+            .unwrap_or("mp4");
+        let trimmed_path = job_staging.join(format!("{clean_title} [{final_tag}].{src_ext}"));
         let trim_req = TrimRequest {
             input: working_path.clone(),
             output: trimmed_path.clone(),
@@ -372,6 +836,7 @@ async fn handle_download_job_with_config<W: Write>(
             overwrite: true,
         };
         if let Err(e) = execute_trim(&backend, &ruvic_cfg, trim_req, false).await {
+            log_event(&format!("TRIM_FAILED jobId={job_id} err={e}"));
             send_native_message(
                 &out,
                 &json!({
@@ -390,28 +855,69 @@ async fn handle_download_job_with_config<W: Write>(
         working_path = trimmed_path;
     }
 
-    let final_ext = if is_audio { "mp3" } else { "mp4" };
+    let final_ext = if is_mp3 {
+        "mp3"
+    } else if is_wav {
+        "wav"
+    } else if is_aac {
+        "aac"
+    } else if is_m4a {
+        working_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .filter(|e| e.eq_ignore_ascii_case("m4a") || e.eq_ignore_ascii_case("webm"))
+            .unwrap_or("m4a")
+    } else {
+        working_path
+            .extension()
+            .and_then(|e| e.to_str())
+            .filter(|e| !e.is_empty())
+            .unwrap_or("mp4")
+    };
     let final_file_name = format!("{clean_title} [{final_tag}].{final_ext}");
     let final_dest = final_dir.join(&final_file_name);
 
-    if is_audio {
+    if is_mp3 || is_wav || is_aac {
+        let label = if is_mp3 {
+            "MP3"
+        } else if is_wav {
+            "WAV"
+        } else {
+            "AAC"
+        };
         send_native_message(
             &out,
             &json!({
                 "jobId": job_id,
-                "percent": 90,
-                "status": "ruvic saf Rust medya motoru ile MP3'e dönüştürülüyor..."
+                "percent": 88,
+                "status": format!("ruvic saf Rust motoru ile {label}'e dönüştürülüyor...")
             }),
         );
+        let bitrate = if is_mp3 {
+            Some(normalize_mp3_bitrate_arg(&msg.quality))
+        } else {
+            None
+        };
+        log_event(&format!(
+            "CONVERT_START jobId={job_id} to={final_ext} bitrate={bitrate:?}"
+        ));
         let audio_req = ExtractAudioRequest {
             input: working_path.clone(),
             output: final_dest.clone(),
-            to: Some("mp3".to_string()),
-            copy: false,
+            to: Some(final_ext.to_string()),
+            copy: is_aac,
             overwrite: true,
             audio_stream: None,
+            bitrate,
+            start: if is_mp3 || is_wav {
+                clip_start_str
+            } else {
+                None
+            },
+            duration: if is_mp3 || is_wav { clip_dur } else { None },
         };
         if let Err(e) = execute_extract_audio(&backend, &ruvic_cfg, audio_req, false).await {
+            log_event(&format!("CONVERT_FAILED jobId={job_id} err={e}"));
             send_native_message(
                 &out,
                 &json!({
@@ -419,12 +925,36 @@ async fn handle_download_job_with_config<W: Write>(
                     "percent": 0,
                     "done": true,
                     "ok": false,
-                    "status": "MP3 dönüşüm hatası",
+                    "status": format!("{label} dönüşüm hatası"),
                     "error": e.to_string()
                 }),
             );
             let _ = std::fs::remove_dir_all(&job_staging);
             return;
+        }
+        let _ = std::fs::remove_file(&working_path);
+    } else if is_m4a
+        && msg.clip.is_some()
+        && working_path.extension().and_then(|e| e.to_str()) == Some("m4a")
+    {
+        let remux_req = RemuxRequest {
+            input: working_path.clone(),
+            secondary_input: None,
+            output: final_dest.clone(),
+            overwrite: true,
+            video_stream: None,
+            audio_stream: None,
+        };
+        if execute_remux(&backend, &ruvic_cfg, remux_req, false)
+            .await
+            .is_err()
+        {
+            if final_dest.exists() {
+                let _ = std::fs::remove_file(&final_dest);
+            }
+            if std::fs::rename(&working_path, &final_dest).is_err() {
+                let _ = std::fs::copy(&working_path, &final_dest);
+            }
         }
         let _ = std::fs::remove_file(&working_path);
     } else {
@@ -433,6 +963,7 @@ async fn handle_download_job_with_config<W: Write>(
         }
         if std::fs::rename(&working_path, &final_dest).is_err() {
             if let Err(e) = std::fs::copy(&working_path, &final_dest) {
+                log_event(&format!("MOVE_FAILED jobId={job_id} err={e}"));
                 send_native_message(
                     &out,
                     &json!({
@@ -451,8 +982,46 @@ async fn handle_download_job_with_config<W: Write>(
         }
     }
 
+    // Embed rich album/artist/title/year/cover-art metadata into MP3 and fMP4 (.mp4 / .m4a) outputs.
+    let meta_source_title = if !outcome.title.trim().is_empty() && outcome.title != "youtube_video"
+    {
+        outcome.title.as_str()
+    } else if !msg.title.trim().is_empty() {
+        msg.title.as_str()
+    } else {
+        clean_title.as_str()
+    };
+    let channel_hint = (!msg.channel.trim().is_empty()).then_some(msg.channel.trim());
+    let mut rich_meta =
+        parse_smart_title_metadata(meta_source_title, channel_hint, Some(msg.url.as_str()));
+    if let Some(ref c) = msg.clip
+        && let Some(ref chap) = c.chapter_title
+        && !chap.trim().is_empty()
+    {
+        rich_meta.title = Some(chap.trim().to_string());
+    }
+    rich_meta.cover_jpeg = cover_bytes;
+
+    if is_mp3 {
+        let _ = write_id3v23_to_mp3_file(&final_dest, &rich_meta);
+    } else if final_ext.eq_ignore_ascii_case("mp4") || final_ext.eq_ignore_ascii_case("m4a") {
+        let _ = inject_fmp4_itunes_metadata_file(
+            &final_dest,
+            rich_meta.title.as_deref().unwrap_or(&clean_title),
+            rich_meta.artist.as_deref().unwrap_or("YouTube"),
+            rich_meta.album.as_deref().unwrap_or(&clean_title),
+            rich_meta.year.as_deref().unwrap_or("2026"),
+            rich_meta.comment.as_deref().unwrap_or(&msg.url),
+            rich_meta.cover_jpeg.as_deref(),
+        );
+    }
+
     let _ = std::fs::remove_dir_all(&job_staging);
     let file_size = std::fs::metadata(&final_dest).map(|m| m.len()).unwrap_or(0);
+    log_event(&format!(
+        "DOWNLOAD_OK jobId={job_id} size={file_size} file={}",
+        final_dest.display()
+    ));
 
     send_native_message(
         &out,
@@ -484,7 +1053,7 @@ fn handle_sync_message<W: Write>(msg: &IncomingMessage, out: &Arc<Mutex<W>>) -> 
         "ping" => {
             let resp = PingResponse {
                 ok: true,
-                version: "2.0.0",
+                version: "2.1.0",
                 engine: "ruvid+ruvic-rust",
                 port: 0,
             };
@@ -517,7 +1086,7 @@ fn handle_sync_message<W: Write>(msg: &IncomingMessage, out: &Arc<Mutex<W>>) -> 
             send_native_message(out, &json!({"ok": true}));
             true
         }
-        "download" => false,
+        "download" | "probe" => false,
         other => {
             send_native_message(
                 out,
@@ -536,7 +1105,7 @@ fn handle_sync_message<W: Write>(msg: &IncomingMessage, out: &Arc<Mutex<W>>) -> 
 fn process_native_stream_sync<R: Read, W: Write>(
     mut reader: R,
     out: Arc<Mutex<W>>,
-    mut on_download: impl FnMut(IncomingMessage, Arc<Mutex<W>>),
+    mut on_async: impl FnMut(IncomingMessage, Arc<Mutex<W>>),
 ) {
     while let Ok(Some(buf)) = read_native_frame(&mut reader) {
         let parsed: Result<IncomingMessage, _> = serde_json::from_slice(&buf);
@@ -554,7 +1123,7 @@ fn process_native_stream_sync<R: Read, W: Write>(
         };
 
         if !handle_sync_message(&msg, &out) {
-            on_download(msg, out.clone());
+            on_async(msg, out.clone());
         }
     }
 }
@@ -563,17 +1132,27 @@ fn process_native_stream_sync<R: Read, W: Write>(
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--version" || a == "-V") {
-        println!("GeTube NativeHost 2.0.0 (ruvid+ruvic pure-Rust in-process)");
+        println!("RuviTube NativeHost 2.1.0 (ruvid+ruvic pure-Rust in-process)");
         return;
     }
 
+    log_event(&format!("HOST_START v2.1.0 pid={}", std::process::id()));
     let stdout_lock = Arc::new(Mutex::new(io::stdout()));
     let stdin = io::stdin();
+    let mut handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
     process_native_stream_sync(stdin, stdout_lock, |msg, out_clone| {
-        tokio::spawn(async move {
-            handle_download_job(msg, out_clone).await;
+        let h = tokio::spawn(async move {
+            if msg.action == "probe" {
+                handle_probe_job(msg, out_clone, HostRuntimeConfig::default()).await;
+            } else {
+                handle_download_job(msg, out_clone).await;
+            }
         });
+        handles.push(h);
     });
+    for h in handles {
+        let _ = h.await;
+    }
 }
 
 #[cfg(test)]
@@ -585,26 +1164,27 @@ mod tests {
         let clip = ClipSpec {
             start_sec: 10.0,
             end_sec: 30.0,
+            chapter_title: None,
         };
         assert!(validate_clip(&clip).is_ok());
     }
 
     #[test]
     fn test_validate_clip_long_duration_over_6h() {
-        // Benchmark video AKeUssuu3Is duration: 36738.125s (10h 12m 18s)
         let clip = ClipSpec {
             start_sec: 0.0,
             end_sec: 36738.125,
+            chapter_title: None,
         };
         assert!(validate_clip(&clip).is_ok());
     }
 
     #[test]
     fn test_validate_clip_over_24h() {
-        // Stream clipping beyond 24h
         let clip = ClipSpec {
             start_sec: 86500.0,
             end_sec: 86600.0,
+            chapter_title: None,
         };
         assert!(validate_clip(&clip).is_ok());
     }
@@ -614,6 +1194,7 @@ mod tests {
         let clip = ClipSpec {
             start_sec: 0.0,
             end_sec: 360000.0,
+            chapter_title: None,
         };
         assert!(validate_clip(&clip).is_ok());
     }
@@ -623,6 +1204,7 @@ mod tests {
         let clip = ClipSpec {
             start_sec: -1.0,
             end_sec: 10.0,
+            chapter_title: None,
         };
         assert_eq!(
             validate_clip(&clip),
@@ -635,6 +1217,7 @@ mod tests {
         let clip = ClipSpec {
             start_sec: 20.0,
             end_sec: 10.0,
+            chapter_title: None,
         };
         assert_eq!(
             validate_clip(&clip),
@@ -647,6 +1230,7 @@ mod tests {
         let clip = ClipSpec {
             start_sec: 10.0,
             end_sec: 10.0,
+            chapter_title: None,
         };
         assert_eq!(
             validate_clip(&clip),
@@ -659,6 +1243,7 @@ mod tests {
         let clip = ClipSpec {
             start_sec: f64::NAN,
             end_sec: 10.0,
+            chapter_title: None,
         };
         assert_eq!(validate_clip(&clip), Err("Kesit zamanı geçersiz."));
     }
@@ -668,6 +1253,7 @@ mod tests {
         let clip = ClipSpec {
             start_sec: 0.0,
             end_sec: f64::INFINITY,
+            chapter_title: None,
         };
         assert_eq!(validate_clip(&clip), Err("Kesit zamanı geçersiz."));
     }
@@ -713,13 +1299,26 @@ mod tests {
     }
 
     #[test]
-    fn test_is_allowed_youtube_url_accepts_valid_and_rejects_invalid() {
+    fn test_is_allowed_youtube_url_accepts_all_yt_forms_and_rejects_invalid() {
         assert!(is_allowed_youtube_url(
             "https://www.youtube.com/watch?v=jNQXAC9IVRw"
         ));
         assert!(is_allowed_youtube_url(
-            "https://www.youtube.com/watch?v=jNQXAC9IVRw&t=12s"
+            "https://www.youtube.com/watch?v=jNQXAC9IVRw&t=12s#frag"
         ));
+        assert!(is_allowed_youtube_url(
+            "https://m.youtube.com/watch?v=jNQXAC9IVRw"
+        ));
+        assert!(is_allowed_youtube_url(
+            "https://music.youtube.com/watch?v=jNQXAC9IVRw"
+        ));
+        assert!(is_allowed_youtube_url(
+            "https://www.youtube.com/shorts/jNQXAC9IVRw"
+        ));
+        assert!(is_allowed_youtube_url(
+            "https://www.youtube.com/live/jNQXAC9IVRw"
+        ));
+        assert!(is_allowed_youtube_url("https://youtu.be/jNQXAC9IVRw"));
 
         assert!(!is_allowed_youtube_url(""));
         assert!(!is_allowed_youtube_url(
@@ -745,13 +1344,23 @@ mod tests {
     }
 
     #[test]
-    fn test_quality_tag_video_and_mp3() {
+    fn test_quality_tag_and_bitrate_mapping() {
         assert_eq!(quality_tag("MP3", "320kbps"), "320kbps");
+        assert_eq!(quality_tag("MP3", "256kbps"), "256kbps");
         assert_eq!(quality_tag("MP3", "192kbps"), "192kbps");
-        assert_eq!(quality_tag("MP3", "other"), "192kbps");
+        assert_eq!(quality_tag("MP3", "128kbps"), "128kbps");
+        assert_eq!(quality_tag("MP3", "vbr"), "VBR");
+        assert_eq!(quality_tag("M4A", "original"), "M4A");
+        assert_eq!(quality_tag("WAV", "original"), "WAV");
         assert_eq!(quality_tag("Video", ""), "En iyi");
         assert_eq!(quality_tag("Video", "best"), "En iyi");
-        assert_eq!(quality_tag("Video", "1080p"), "1080p");
+        assert_eq!(quality_tag("Video", "2160p"), "2160p");
+
+        assert_eq!(normalize_mp3_bitrate_arg("320kbps"), "320k");
+        assert_eq!(normalize_mp3_bitrate_arg("vbr"), "vbr");
+        assert_eq!(normalize_mp3_bitrate_arg("128kbps"), "128k");
+        assert_eq!(resolve_video_format_spec("2160p"), "2160p");
+        assert_eq!(resolve_video_format_spec("itag-137"), "itag-137");
     }
 
     fn encode_frame(bytes: &[u8]) -> Vec<u8> {
@@ -791,7 +1400,7 @@ mod tests {
         assert_eq!(responses.len(), 3);
 
         assert_eq!(responses[0]["ok"], json!(true));
-        assert_eq!(responses[0]["version"], json!("2.0.0"));
+        assert_eq!(responses[0]["version"], json!("2.1.0"));
         assert_eq!(responses[0]["engine"], json!("ruvid+ruvic-rust"));
 
         assert_eq!(responses[1]["ok"], json!(false));
@@ -849,7 +1458,6 @@ mod tests {
         use tokio::io::{AsyncReadExt, AsyncWriteExt};
         use tokio::net::TcpListener;
 
-        // 128 KiB payload -> with jobs=8, ruvid plan_chunks splits into 16 x 8 KiB HTTP Range chunks.
         let payload: Vec<u8> = (0..(128 * 1024))
             .map(|i| ((i * 31 + 7) % 251) as u8)
             .collect();
@@ -1012,6 +1620,8 @@ var ytInitialPlayerResponse = {{
             file_path: String::new(),
             jobs: Some(8),
             clip: None,
+            channel: String::new(),
+            title: String::new(),
         };
 
         let out_buf = Arc::new(Mutex::new(Vec::<u8>::new()));
@@ -1051,11 +1661,34 @@ var ytInitialPlayerResponse = {{
         let downloaded = std::fs::read(&file_path).expect("read downloaded file");
         assert_eq!(downloaded, payload);
 
-        // jobs=8 on 128 KiB triggers 16 parallel Range chunks in ruvid::downloader::plan_chunks.
         assert!(
             range_requests.load(Ordering::Relaxed) >= 8,
             "expected multiple HTTP Range requests for --jobs 8, got {}",
             range_requests.load(Ordering::Relaxed)
         );
+    }
+}
+
+#[cfg(test)]
+mod format_spec_tests {
+    use super::{quality_tag, resolve_video_format_spec};
+
+    #[test]
+    fn resolves_high_fps_composite_and_opus() {
+        assert_eq!(resolve_video_format_spec("2160p60"), "2160p60");
+        assert_eq!(resolve_video_format_spec("1440P"), "1440p");
+        assert_eq!(resolve_video_format_spec("itag-313"), "itag-313");
+        assert_eq!(resolve_video_format_spec("itag-140-9"), "itag-140-9");
+        assert_eq!(
+            resolve_video_format_spec("itag-313|2160p:webm"),
+            "itag-313|2160p:webm"
+        );
+        assert_eq!(
+            resolve_video_format_spec("itag-299|1080p60:mp4"),
+            "itag-299|1080p60:mp4"
+        );
+        assert_eq!(resolve_video_format_spec("itag-1|999p:avi"), "best");
+        assert_eq!(resolve_video_format_spec("../evil"), "best");
+        assert_eq!(quality_tag("OPUS", "original"), "Opus");
     }
 }

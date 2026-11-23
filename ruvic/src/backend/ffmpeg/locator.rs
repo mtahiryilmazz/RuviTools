@@ -90,12 +90,18 @@ fn search_in_path(candidate: &Path) -> Option<PathBuf> {
     }
 
     let path_var = std::env::var_os("PATH");
-    let mut dirs: Vec<PathBuf> = path_var
+    let path_dirs: Vec<PathBuf> = path_var
         .as_deref()
         .map(std::env::split_paths)
         .into_iter()
         .flatten()
         .collect();
+
+    // `mut` is only needed on Windows, where the WinGet shim directory is appended.
+    #[cfg(windows)]
+    let mut dirs = path_dirs;
+    #[cfg(not(windows))]
+    let dirs = path_dirs;
 
     #[cfg(windows)]
     if let Some(local_app_data) = std::env::var_os("LOCALAPPDATA") {

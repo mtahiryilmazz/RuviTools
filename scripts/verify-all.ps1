@@ -147,6 +147,30 @@ if (-not (Test-Path -LiteralPath $extRoot -PathType Container)) {
   }
 }
 
+# 3b. Extension JavaScript syntax validation (via Node if available)
+$nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+if (-not $nodeCmd -and (Test-Path 'C:\Program Files\nodejs\node.exe')) {
+  $nodeCmd = Get-Command 'C:\Program Files\nodejs\node.exe' -ErrorAction SilentlyContinue
+}
+if ($nodeCmd -and (Test-Path -LiteralPath $extRoot -PathType Container)) {
+  $jsFiles = Get-ChildItem -LiteralPath $extRoot -Filter '*.js' -File -Recurse -ErrorAction SilentlyContinue
+  $jsErrors = @()
+  $prevEap = $ErrorActionPreference
+  $ErrorActionPreference = 'Continue'
+  foreach ($jf in $jsFiles) {
+    $out = & $nodeCmd.Source --check $jf.FullName 2>&1
+    if ($LASTEXITCODE -ne 0) {
+      $jsErrors += "$($jf.Name): $(($out | Out-String).Trim())"
+    }
+  }
+  $ErrorActionPreference = $prevEap
+  if ($jsErrors.Count -eq 0) {
+    Add-CheckResult -Check 'Extension JS Syntax' -Passed $true -Detail "$($jsFiles.Count) JS files valid"
+  } else {
+    Add-CheckResult -Check 'Extension JS Syntax' -Passed $false -Detail ($jsErrors -join ' | ')
+  }
+}
+
 # 4. Installer entrypoints & PowerShell AST syntax validation
 $requiredInstallerFiles = @(
   'ruvitube\installer\Kurulum.cmd',

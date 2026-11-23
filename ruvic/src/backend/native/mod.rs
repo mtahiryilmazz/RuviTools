@@ -1,4 +1,6 @@
+pub mod audio_transcode;
 pub mod container_probe;
+pub mod dual_mux;
 pub mod ebml;
 pub mod mp4_atoms;
 pub mod processor;

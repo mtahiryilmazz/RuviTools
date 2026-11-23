@@ -26,3 +26,6 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync", "time"
 strip = true
 lto = "fat"
 codegen-units = 1
+
+[profile.dev.package."*"]
+opt-level = 3

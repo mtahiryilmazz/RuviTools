@@ -236,6 +236,10 @@ pub struct AudioArgs {
     /// Explicit audio stream index
     #[arg(long, value_name = "INDEX")]
     pub audio_stream: Option<usize>,
+
+    /// Target audio bitrate (e.g. 320k, 256k, 192k, 128k, or vbr)
+    #[arg(short, long, value_name = "RATE")]
+    pub bitrate: Option<String>,
 }
 
 #[derive(Debug, Args)]

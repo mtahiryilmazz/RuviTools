@@ -1,13 +1,12 @@
-/* GeTube — ayarlar sayfası. Tek doğruluk kaynağı chrome.storage.local: 'getube.settings'. */
+/* RuviTube — ayarlar sayfası. Tek doğruluk kaynağı chrome.storage.local: 'ruvitube.settings'. */
 'use strict';
 
-// Arayüz Türkçe: tarayıcı dilinden bağımsız sabit metinler.
 const TR = {
-  optTitle: 'GeTube ayarları',
-  extName: 'GeTube',
+  optTitle: 'RuviTube ayarları',
+  extName: 'RuviTube',
   optDefaults: 'Varsayılanlar',
   optVideoQuality: 'Varsayılan görüntü kalitesi',
-  optAudioQuality: 'Varsayılan ses kalitesi',
+  optAudioQuality: 'Varsayılan MP3 ses kalitesi',
   optClipLength: 'Varsayılan kesit süresi (saniye)',
   optJobs: 'Paralel Range Parçaları (--jobs)',
   optJobsHint: 'Aynı anda indirilecek HTTP Range parça sayısı',
@@ -16,6 +15,7 @@ const TR = {
   optOpenFile: 'İndirilen dosyayı aç',
   optOpenFolder: 'İndirme klasörünü aç',
   optBehavior: 'Davranış',
+  optFloatingPill: 'Video oynatıcı üzerinde kalite & MP3 menüsü',
   optShowStatus: 'Düğme üzerinde yüzde göster',
   optRememberClip: 'Son kullanılan kesit süresini hatırla',
   optSaved: 'Kaydedildi',
@@ -27,13 +27,13 @@ const DEFAULTS = {
   openDownloads: false,
   openFile: false,
   openFolder: false,
-  videoQuality: '720p',
+  videoQuality: '1080p',
   audioQuality: '320kbps',
   clipLength: 30,
   jobs: 4,
-  jobsCount: '4',
   rememberClip: true,
-  showStatus: true
+  showStatus: true,
+  showFloatingPill: true
 };
 
 const VALID_JOBS = [1, 2, 4, 8, 16];
@@ -44,8 +44,8 @@ function normalizeJobs(raw) {
   return Math.min(16, Math.max(1, n));
 }
 
-const CHECKS = ['openDownloads', 'openFile', 'openFolder', 'rememberClip', 'showStatus'];
-const SELECTS = ['videoQuality', 'audioQuality', 'jobsCount'];
+const CHECKS = ['openDownloads', 'openFile', 'openFolder', 'rememberClip', 'showStatus', 'showFloatingPill'];
+const SELECTS = ['videoQuality', 'audioQuality'];
 const $ = id => document.getElementById(id);
 
 function applyI18n() {
@@ -63,13 +63,18 @@ function readForm() {
   SELECTS.forEach(id => { value[id] = $(id).value; });
   value.jobs = normalizeJobs($('jobs').value);
   const clip = Number($('clipLength').value);
-  value.clipLength = isFinite(clip) ? Math.max(1, Math.round(clip)) : DEFAULTS.clipLength;
+  value.clipLength = Number.isFinite(clip) ? Math.max(1, Math.round(clip)) : DEFAULTS.clipLength;
   return value;
 }
 
 function render(settings) {
   CHECKS.forEach(id => { $(id).checked = !!settings[id]; });
-  SELECTS.forEach(id => { $(id).value = settings[id]; });
+  SELECTS.forEach(id => {
+    const el = $(id);
+    const val = settings[id];
+    const hasOption = Array.from(el.options).some(o => o.value === val);
+    el.value = hasOption ? val : DEFAULTS[id];
+  });
   const normalizedJobs = normalizeJobs(settings.jobs);
   $('jobs').value = String(VALID_JOBS.includes(normalizedJobs) ? normalizedJobs : DEFAULTS.jobs);
   $('clipLength').value = String(settings.clipLength);
@@ -101,10 +106,9 @@ async function load() {
 applyI18n();
 load();
 
-CHECKS.concat(SELECTS, ['jobs']).forEach(id => {
+CHECKS.concat(SELECTS, ['jobs', 'clipLength']).forEach(id => {
   $(id).addEventListener('change', scheduleSave);
 });
-$('clipLength').addEventListener('change', scheduleSave);
 
 $('reset').addEventListener('click', async () => {
   await chrome.storage.local.set({ [SETTINGS_KEY]: Object.assign({}, DEFAULTS) });

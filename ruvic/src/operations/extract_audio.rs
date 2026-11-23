@@ -16,6 +16,9 @@ pub struct ExtractAudioRequest {
     pub copy: bool,
     pub overwrite: bool,
     pub audio_stream: Option<usize>,
+    pub bitrate: Option<String>,
+    pub start: Option<String>,
+    pub duration: Option<f64>,
 }
 
 pub async fn execute_extract_audio(
@@ -51,7 +54,7 @@ pub async fn execute_extract_audio(
         quality: None,
         speed_preset: None,
         pixel_format: None,
-        audio_bitrate: Some("192k".to_string()),
+        audio_bitrate: req.bitrate.or_else(|| Some("192k".to_string())),
         max_height: None,
         faststart: false,
         threads: config.processing.threads,
@@ -59,9 +62,9 @@ pub async fn execute_extract_audio(
         video_stream: None,
         audio_stream: req.audio_stream,
         subtitle_mode: SubtitleMode::None,
-        start_time: None,
+        start_time: req.start,
         end_time: None,
-        duration_seconds: None,
+        duration_seconds: req.duration,
         thumbnail_at: None,
         reencode: !req.copy,
     };

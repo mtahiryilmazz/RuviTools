@@ -1,14 +1,13 @@
-/* GeTube — popup: son işler ve kısayollar. */
+/* RuviTube — popup: son işler, canlı yüzde ve kısayollar. */
 'use strict';
 
-// Arayüz Türkçe: tarayıcı dilinden bağımsız sabit metinler.
 const TR = {
   popupLast: 'Son işler',
   popupIdle: 'Bekleyen indirme yok',
   popupJobs: 'Paralel Range Parçaları (--jobs)',
   popupSettings: 'Ayarlar',
-  popupDownloads: 'İndirilenler',
-  popupOpenYoutube: "YouTube'da bir video açın",
+  popupFolder: 'Klasörü Aç',
+  popupOpenYoutube: "YouTube'da videonun sağ üstündeki RuviTube menüsünden kalite veya MP3 seçin",
   statusDone: 'Tamamlandı',
   statusError: 'Hata'
 };
@@ -41,14 +40,41 @@ function renderJob(job) {
   top.className = 'top';
 
   const name = document.createElement('span');
-  name.textContent = job.label || job.type || 'GeTube';
+  name.textContent = job.label || job.type || 'RuviTube';
 
   const status = document.createElement('em');
-  if (job.state === 'done') status.textContent = job.fileName || (TR.statusDone || 'Tamamlandı');
-  else if (job.state === 'failed') status.textContent = job.error || (TR.statusError || 'Hata');
+  if (job.state === 'done') status.textContent = TR.statusDone;
+  else if (job.state === 'failed') status.textContent = TR.statusError;
   else status.textContent = Math.round(Number(job.percent) || 0) + '%';
 
   top.append(name, status);
+
+  const sub = document.createElement('div');
+  sub.className = 'sub';
+  const detail = document.createElement('span');
+  detail.textContent = job.state === 'done'
+    ? (job.fileName || job.status || '')
+    : (job.state === 'failed' ? (job.error || job.status || '') : (job.status || ''));
+  sub.appendChild(detail);
+
+  if (job.state === 'running' || job.state === 'downloading' || job.state === 'queued') {
+    const cancelBtn = document.createElement('button');
+    cancelBtn.type = 'button';
+    cancelBtn.textContent = 'İptal';
+    cancelBtn.addEventListener('click', async () => {
+      await chrome.runtime.sendMessage({ action: 'cancel_job', jobId: job.jobId }).catch(() => {});
+      loadJobs();
+    });
+    sub.appendChild(cancelBtn);
+  } else if (job.state === 'done' && job.filePath) {
+    const openBtn = document.createElement('button');
+    openBtn.type = 'button';
+    openBtn.textContent = 'Aç';
+    openBtn.addEventListener('click', () => {
+      chrome.runtime.sendMessage({ action: 'open_file', filePath: job.filePath }).catch(() => {});
+    });
+    sub.appendChild(openBtn);
+  }
 
   const bar = document.createElement('div');
   bar.className = 'bar';
@@ -57,7 +83,7 @@ function renderJob(job) {
   fill.style.width = pct + '%';
   bar.appendChild(fill);
 
-  wrap.append(top, bar);
+  wrap.append(top, sub, bar);
   wrap.title = job.status || '';
   return wrap;
 }
@@ -68,14 +94,14 @@ async function loadJobs() {
   try {
     const response = await chrome.runtime.sendMessage({ action: 'get_jobs' });
     if (response && response.ok) jobs = response.jobs || [];
-  } catch (_) { /* service worker uyanmamış olabilir */ }
+  } catch (_) {}
 
   const visible = jobs.slice(0, 4);
   container.textContent = '';
   if (!visible.length) {
     const empty = document.createElement('div');
     empty.className = 'empty';
-    empty.textContent = TR.popupIdle || 'Bekleyen indirme yok';
+    empty.textContent = TR.popupIdle;
     container.appendChild(empty);
     return;
   }
@@ -112,13 +138,73 @@ chrome.storage.onChanged.addListener((changes, area) => {
 applyI18n();
 loadJobs();
 loadJobsSetting();
+initActiveMediaCard();
+setInterval(loadJobs, 1000);
+
+function normalizeYouTubeWatchUrl(rawUrl) {
+  try {
+    const u = new URL(rawUrl);
+    const host = u.hostname.replace(/^(www|m|music)\./i, '').toLowerCase();
+    if (host === 'youtu.be') {
+      const id = u.pathname.split('/')[1];
+      return id ? `https://www.youtube.com/watch?v=${encodeURIComponent(id)}` : null;
+    }
+    if (host === 'youtube.com' || host === 'youtube-nocookie.com') {
+      const v = u.searchParams.get('v');
+      if (u.pathname.startsWith('/watch') && v) {
+        return `https://www.youtube.com/watch?v=${encodeURIComponent(v)}`;
+      }
+      const m = /^\/(shorts|live|embed)\/([\w-]+)/.exec(u.pathname);
+      if (m) return `https://www.youtube.com/watch?v=${encodeURIComponent(m[2])}`;
+    }
+  } catch (_) {}
+  return null;
+}
+
+async function initActiveMediaCard() {
+  const card = $('activeMedia');
+  const titleEl = $('activeTitle');
+  if (!card || !titleEl) return;
+  try {
+    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tab = tabs && tabs[0];
+    const ytUrl = tab && tab.url ? normalizeYouTubeWatchUrl(tab.url) : null;
+    if (!ytUrl) return;
+    const cleanTitle = String(tab.title || 'YouTube Video')
+      .replace(/^\(\d+\)\s+/, '')
+      .replace(/\s+[-–|]\s*YouTube$/i, '')
+      .trim();
+    titleEl.textContent = cleanTitle || ytUrl;
+    card.hidden = false;
+
+    card.querySelectorAll('button[data-type]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const type = btn.dataset.type || 'MP3';
+        const quality = btn.dataset.quality || '320kbps';
+        const jobs = normalizeJobs($('jobsSelect').value);
+        btn.disabled = true;
+        try {
+          await chrome.runtime.sendMessage({
+            action: 'start_download',
+            url: ytUrl,
+            type,
+            quality,
+            jobs,
+            label: `${type} · ${quality} (${cleanTitle.slice(0, 36)})`
+          });
+          await loadJobs();
+        } catch (_) {}
+        setTimeout(() => { btn.disabled = false; }, 600);
+      });
+    });
+  } catch (_) {}
+}
 
 $('options').addEventListener('click', () => {
   chrome.runtime.openOptionsPage();
   window.close();
 });
 
-$('downloads').addEventListener('click', () => {
-  chrome.tabs.create({ url: 'chrome://downloads/' });
-  window.close();
+$('openFolder').addEventListener('click', () => {
+  chrome.runtime.sendMessage({ action: 'open_folder' }).catch(() => {});
 });

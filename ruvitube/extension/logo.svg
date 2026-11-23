@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" width="256" height="256" fill="none">
+  <defs>
+    <linearGradient id="rtBg" x1="0" y1="0" x2="256" y2="256" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF331F"/>
+      <stop offset="55%" stop-color="#FF5714"/>
+      <stop offset="100%" stop-color="#FF7F0A"/>
+    </linearGradient>
+    <linearGradient id="rtRibbon" x1="68" y1="52" x2="188" y2="200" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FFFFFF"/>
+      <stop offset="100%" stop-color="#FFEFE5"/>
+    </linearGradient>
+  </defs>
+  <rect x="8" y="8" width="240" height="240" rx="54" fill="url(#rtBg)"/>
+  <!-- Continuous R Ribbon Monogram -->
+  <path d="M68 54H136C166.928 54 190 75.4903 190 103.5C190 128.42 171.62 147.88 145.8 151.9L184 202H147.5L114 156H98C90.268 156 85 161.268 85 169V202H68V158C68 138.118 82.1177 124 102 124H134C147.255 124 157 115.493 157 103.5C157 91.5066 147.255 83 134 83H98V113.5C85.8 115.6 75.4 121.8 68 131V54Z" fill="url(#rtRibbon)"/>
+  <!-- Inner Play Triangle -->
+  <path d="M114 91.5L137 104.5L114 117.5V91.5Z" fill="#FFFFFF"/>
+</svg>

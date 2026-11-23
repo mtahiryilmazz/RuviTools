@@ -139,6 +139,8 @@ pub enum MediaOperationKind {
     ConvertVideo,
     RemuxFaststart,
     TrimRange,
+    ExtractAudioMp3,
+    ExtractAudioWav,
     ExtractAudioAac,
     ExtractAudioM4a,
     Thumbnail,
@@ -150,10 +152,35 @@ impl MediaOperationKind {
             Self::ConvertVideo => "Video Dönüştürme (Convert / Transcode)",
             Self::RemuxFaststart => "Faststart Remux (MP4 / WebM)",
             Self::TrimRange => "Zaman Araligi Kesme (Trim)",
+            Self::ExtractAudioMp3 => "Ses Çıkarımı (Saf Rust .mp3)",
+            Self::ExtractAudioWav => "Ses Çıkarımı (PCM .wav)",
             Self::ExtractAudioAac => "Ses Cikarimi (ADTS .aac)",
             Self::ExtractAudioM4a => "Ses Cikarimi (Kapsayici .m4a)",
             Self::Thumbnail => "Kucuk Resim Yakala (Thumbnail)",
         }
+    }
+}
+
+fn read_native_host_log_tail() -> String {
+    let Ok(local_app_data) = std::env::var("LOCALAPPDATA") else {
+        return "LOCALAPPDATA ortam değişkeni bulunamadı.".to_string();
+    };
+    let log_path = PathBuf::from(local_app_data)
+        .join("RuviTube")
+        .join("nativehost.log");
+    match std::fs::read_to_string(&log_path) {
+        Ok(content) => {
+            let lines: Vec<&str> = content.lines().filter(|l| !l.trim().is_empty()).collect();
+            if lines.is_empty() {
+                return format!("{} dosyası henüz boş.", log_path.display());
+            }
+            let start = lines.len().saturating_sub(20);
+            lines[start..].join("\n")
+        }
+        Err(_) => format!(
+            "Henüz NativeHost günlüğü yok ({}). Eklentiden ilk indirmeden sonra oluşur.",
+            log_path.display()
+        ),
     }
 }
 
@@ -500,6 +527,7 @@ pub struct RuviStudioApp {
     pub thumbnail_at: String,
     pub probed_info: Option<MediaInfo>,
     pub last_media_op: Option<OperationResult>,
+    pub mp3_bitrate: String,
 
     // Playlist tab state
     pub playlist_url: String,
@@ -515,6 +543,7 @@ pub struct RuviStudioApp {
     pub getube_status: String,
     pub getube_native_host_found: bool,
     pub getube_extension_found: bool,
+    pub native_log_tail: String,
     theme_initialized: bool,
     chrome_applied_theme: Option<StudioTheme>,
 }
@@ -603,16 +632,19 @@ impl RuviStudioApp {
             thumbnail_at: "00:00:02".to_string(),
             probed_info: None,
             last_media_op: None,
+            mp3_bitrate: "320k".to_string(),
             playlist_url: String::new(),
             playlist_output_dir: "./downloads/playlist".to_string(),
             playlist_concurrency: 2,
             playlist_skip_errors: true,
             playlist_entries: Vec::new(),
             telemetry: StudioTelemetry::default(),
+            native_log_tail: String::new(),
             theme_initialized: false,
             chrome_applied_theme: None,
         };
         app.check_getube_status();
+        app.refresh_native_log_tail();
         app
     }
 
@@ -951,6 +983,35 @@ impl RuviStudioApp {
                     ui.label("Varsayılan --jobs Değeri:");
                     ui.add(egui::Slider::new(&mut self.jobs_count, 1..=16).suffix(" parça"));
                 });
+            },
+        );
+
+        ui.add_space(8.0);
+        theme.render_card(
+            ui,
+            Some("NativeHost Günlüğü (%LOCALAPPDATA%\\RuviTube\\nativehost.log)"),
+            |ui| {
+                ui.horizontal(|ui| {
+                    if ui.button("Günlüğü Yenile").clicked() {
+                        self.refresh_native_log_tail();
+                    }
+                    ui.label(
+                        RichText::new("Son 20 satır (hassas parametreler maskelenir)")
+                            .size(12.0)
+                            .color(theme.status_text()),
+                    );
+                });
+                ui.add_space(4.0);
+                ScrollArea::vertical()
+                    .id_salt("native_host_log_tail_scroll")
+                    .max_height(150.0)
+                    .show(ui, |ui| {
+                        ui.add(
+                            egui::TextEdit::multiline(&mut self.native_log_tail.as_str())
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(f32::INFINITY),
+                        );
+                    });
             },
         );
     }
@@ -1369,21 +1430,103 @@ impl RuviStudioApp {
         });
     }
 
+    fn refresh_native_log_tail(&mut self) {
+        self.native_log_tail = read_native_host_log_tail();
+    }
+
     fn spawn_download(&mut self) {
-        let job = self.build_download_job();
+        let mut job = self.build_download_job();
         if job.url.is_empty() {
             self.error_banner = Some("Lütfen indirilecek URL'yi girin.".to_string());
             return;
         }
+        let mp3_rate = job.format_spec.strip_prefix("mp3:").map(|raw| {
+            let trimmed = raw.trim();
+            if trimmed.eq_ignore_ascii_case("vbr") || trimmed == "0" || trimmed.is_empty() {
+                "vbr".to_string()
+            } else if trimmed.to_ascii_lowercase().ends_with('k') {
+                trimmed.to_string()
+            } else {
+                format!("{trimmed}k")
+            }
+        });
+        let want_wav = job.format_spec.trim().eq_ignore_ascii_case("wav");
+        // (target extension, bitrate) for in-process ruvic transcoding after download
+        let audio_target: Option<(&'static str, Option<String>)> = match (mp3_rate, want_wav) {
+            (Some(rate), _) => Some(("mp3", Some(rate))),
+            (None, true) => Some(("wav", None)),
+            _ => None,
+        };
+        if audio_target.is_some() {
+            job.format_spec = "bestaudio".to_string();
+        }
         self.busy = true;
         self.error_banner = None;
-        self.status_line = format!("Indiriliyor ({} --jobs {})...", job.format_spec, job.jobs);
+        self.status_line = match audio_target {
+            Some((ext, ref rate)) => format!(
+                "{} ({}) indiriliyor (--jobs {})...",
+                ext.to_ascii_uppercase(),
+                rate.as_deref().unwrap_or("PCM"),
+                job.jobs
+            ),
+            None => format!("Indiriliyor ({} --jobs {})...", job.format_spec, job.jobs),
+        };
         let tx = self.tx.clone();
         self.runtime.spawn(async move {
             let start = Instant::now();
             let cfg = RuvidConfig::default();
             match execute_download(&cfg, job, false).await {
-                Ok(outcome) => {
+                Ok(mut outcome) => {
+                    if let Some((target_ext, rate_arg)) = audio_target {
+                        let downloaded_path = PathBuf::from(&outcome.output_path);
+                        let final_mp3 = downloaded_path.with_extension(target_ext);
+                        let transcode_input = if downloaded_path == final_mp3 {
+                            let staged = downloaded_path.with_extension("raw_audio");
+                            if let Err(e) = std::fs::rename(&downloaded_path, &staged) {
+                                let _ = tx.send(GuiEvent::TaskFailed {
+                                    context: "MP3 Hazırlık".to_string(),
+                                    error: e.to_string(),
+                                });
+                                return;
+                            }
+                            staged
+                        } else {
+                            downloaded_path
+                        };
+                        let res = execute_extract_audio(
+                            &NativeMediaBackend::new(),
+                            &RuvicConfig::default(),
+                            ExtractAudioRequest {
+                                input: transcode_input.clone(),
+                                output: final_mp3.clone(),
+                                to: Some(target_ext.to_string()),
+                                copy: false,
+                                overwrite: true,
+                                audio_stream: None,
+                                bitrate: rate_arg,
+                                start: None,
+                                duration: None,
+                            },
+                            false,
+                        )
+                        .await;
+                        let _ = std::fs::remove_file(&transcode_input);
+                        match res {
+                            Ok(_) => {
+                                outcome.output_path = final_mp3.display().to_string();
+                                outcome.bytes_downloaded = std::fs::metadata(&final_mp3)
+                                    .map(|m| m.len())
+                                    .unwrap_or(outcome.bytes_downloaded);
+                            }
+                            Err(e) => {
+                                let _ = tx.send(GuiEvent::TaskFailed {
+                                    context: "MP3 Dönüştürme".to_string(),
+                                    error: e.to_string(),
+                                });
+                                return;
+                            }
+                        }
+                    }
                     let _ = tx.send(GuiEvent::DownloadFinished {
                         outcome,
                         elapsed_ms: start.elapsed().as_secs_f64() * 1000.0,
@@ -1459,6 +1602,7 @@ impl RuviStudioApp {
         let trim_start = self.trim_start.trim().to_string();
         let trim_dur = self.trim_duration.max(0.1);
         let thumb_at = self.thumbnail_at.trim().to_string();
+        let mp3_bitrate = self.mp3_bitrate.trim().to_string();
 
         self.busy = true;
         self.error_banner = None;
@@ -1527,6 +1671,44 @@ impl RuviStudioApp {
                     )
                     .await
                 }
+                MediaOperationKind::ExtractAudioMp3 => {
+                    execute_extract_audio(
+                        &backend,
+                        &config,
+                        ExtractAudioRequest {
+                            input,
+                            output,
+                            to: Some("mp3".to_string()),
+                            copy: false,
+                            overwrite: true,
+                            audio_stream: None,
+                            bitrate: Some(mp3_bitrate),
+                            start: None,
+                            duration: None,
+                        },
+                        false,
+                    )
+                    .await
+                }
+                MediaOperationKind::ExtractAudioWav => {
+                    execute_extract_audio(
+                        &backend,
+                        &config,
+                        ExtractAudioRequest {
+                            input,
+                            output,
+                            to: Some("wav".to_string()),
+                            copy: false,
+                            overwrite: true,
+                            audio_stream: None,
+                            bitrate: None,
+                            start: None,
+                            duration: None,
+                        },
+                        false,
+                    )
+                    .await
+                }
                 MediaOperationKind::ExtractAudioAac => {
                     execute_extract_audio(
                         &backend,
@@ -1538,6 +1720,9 @@ impl RuviStudioApp {
                             copy: true,
                             overwrite: true,
                             audio_stream: None,
+                            bitrate: None,
+                            start: None,
+                            duration: None,
                         },
                         false,
                     )
@@ -1554,6 +1739,9 @@ impl RuviStudioApp {
                             copy: true,
                             overwrite: true,
                             audio_stream: None,
+                            bitrate: None,
+                            start: None,
+                            duration: None,
                         },
                         false,
                     )
@@ -2264,7 +2452,29 @@ impl RuviStudioApp {
                         ui.label("Format / Çözünürlük:");
                         ui.horizontal_wrapped(|ui| {
                             for preset in [
-                                "best", "4320p", "2160p", "1080p", "720p", "360p", "240p", "worst",
+                                "best",
+                                "4320p",
+                                "2160p60",
+                                "2160p",
+                                "1440p",
+                                "1080p60",
+                                "1080p",
+                                "720p60",
+                                "720p",
+                                "480p",
+                                "360p",
+                                "240p",
+                                "144p",
+                                "worst",
+                                "mp3:320",
+                                "mp3:256",
+                                "mp3:192",
+                                "mp3:128",
+                                "mp3:vbr",
+                                "wav",
+                                "m4a",
+                                "opus",
+                                "bestaudio",
                             ] {
                                 ui.selectable_value(
                                     &mut self.format_spec,
@@ -2545,6 +2755,8 @@ impl RuviStudioApp {
                                 MediaOperationKind::ConvertVideo,
                                 MediaOperationKind::RemuxFaststart,
                                 MediaOperationKind::TrimRange,
+                                MediaOperationKind::ExtractAudioMp3,
+                                MediaOperationKind::ExtractAudioWav,
                                 MediaOperationKind::ExtractAudioAac,
                                 MediaOperationKind::ExtractAudioM4a,
                                 MediaOperationKind::Thumbnail,
@@ -2609,6 +2821,18 @@ impl RuviStudioApp {
                                 egui::TextEdit::singleline(&mut self.thumbnail_at)
                                     .desired_width(90.0),
                             );
+                            ui.end_row();
+                        } else if self.media_op == MediaOperationKind::ExtractAudioMp3 {
+                            ui.label("MP3 Bit Hızı (--bitrate):");
+                            ui.horizontal_wrapped(|ui| {
+                                for rate in ["320k", "256k", "192k", "128k", "vbr"] {
+                                    ui.selectable_value(
+                                        &mut self.mp3_bitrate,
+                                        rate.to_string(),
+                                        rate,
+                                    );
+                                }
+                            });
                             ui.end_row();
                         }
 

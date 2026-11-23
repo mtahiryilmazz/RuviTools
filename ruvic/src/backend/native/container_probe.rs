@@ -64,6 +64,13 @@ pub fn probe_media_file(path: &Path) -> RuviResult<ProbedSource> {
     file.read_exact(&mut probe_buf)?;
     let mut probed = probe_media_bytes(&probe_buf, &label, ext_hint)?;
     probed.info.container.size_bytes = Some(file_len);
+    if probed.info.container.format_name == "mp3" && file_len > probe_limit as u64 {
+        if let Some(br) = probed.info.container.bit_rate.filter(|&b| b > 0) {
+            let audio_bytes = file_len.saturating_sub(probed.payload_slice.0 as u64);
+            probed.info.container.duration_seconds =
+                Some(((audio_bytes as f64) * 8.0 / br as f64).max(0.1));
+        }
+    }
     if probed.payload_slice.1 >= probe_limit {
         probed.payload_slice.1 = file_len as usize;
     }
@@ -326,8 +333,8 @@ pub fn probe_media_bytes(
     }
 
     // 7. MP3 (ID3 tag or MPEG sync)
-    if let Some(info) = try_parse_mp3(data, path_label) {
-        return Ok(ProbedSource::new(info, (0, data.len())));
+    if let Some((info, id3_end)) = try_parse_mp3(data, path_label) {
+        return Ok(ProbedSource::new(info, (id3_end, data.len())));
     }
 
     // 8. AAC ADTS (`0xFFF1` or `0xFFF9`)
@@ -663,7 +670,7 @@ fn parse_ogg(data: &[u8], path_label: &str) -> RuviResult<MediaInfo> {
     })
 }
 
-fn try_parse_mp3(data: &[u8], path_label: &str) -> Option<MediaInfo> {
+fn try_parse_mp3(data: &[u8], path_label: &str) -> Option<(MediaInfo, usize)> {
     let mut offset = 0usize;
     if data.len() >= 10 && &data[0..3] == b"ID3" {
         let size = ((usize::from(data[6] & 0x7F)) << 21)
@@ -708,36 +715,45 @@ fn try_parse_mp3(data: &[u8], path_label: &str) -> Option<MediaInfo> {
     const MPEG1_L3_KBPS: [u64; 15] = [
         0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320,
     ];
-    let bitrate_bps = MPEG1_L3_KBPS.get(br_idx).copied().unwrap_or(192).max(32) * 1000;
+    const MPEG2_L3_KBPS: [u64; 15] = [0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160];
+    let bitrate_table = if version == 3 {
+        &MPEG1_L3_KBPS
+    } else {
+        &MPEG2_L3_KBPS
+    };
+    let bitrate_bps = bitrate_table.get(br_idx).copied().unwrap_or(192).max(8) * 1000;
     let channels = if ((hdr[3] >> 6) & 0x03) == 3 { 1 } else { 2 };
     let payload_bytes = data.len().saturating_sub(offset) as f64;
     let dur = (payload_bytes * 8.0 / bitrate_bps as f64).max(0.1);
 
-    Some(MediaInfo {
-        path: path_label.to_string(),
-        container: ContainerInfo {
-            format_name: "mp3".to_string(),
-            format_long_name: Some("MP2/3 (MPEG audio layer 2/3)".to_string()),
-            duration_seconds: Some(dur),
-            size_bytes: Some(data.len() as u64),
-            bit_rate: Some(bitrate_bps),
+    Some((
+        MediaInfo {
+            path: path_label.to_string(),
+            container: ContainerInfo {
+                format_name: "mp3".to_string(),
+                format_long_name: Some("MP2/3 (MPEG audio layer 2/3)".to_string()),
+                duration_seconds: Some(dur),
+                size_bytes: Some(data.len() as u64),
+                bit_rate: Some(bitrate_bps),
+            },
+            streams: vec![StreamInfo {
+                index: 0,
+                kind: StreamKind::Audio,
+                codec_name: "mp3".to_string(),
+                width: None,
+                height: None,
+                fps: None,
+                sample_rate: Some(sample_rate),
+                channels: Some(channels),
+                bit_rate: Some(bitrate_bps),
+                language: None,
+                pixel_format: None,
+                ..Default::default()
+            }],
+            chapters: Vec::new(),
         },
-        streams: vec![StreamInfo {
-            index: 0,
-            kind: StreamKind::Audio,
-            codec_name: "mp3".to_string(),
-            width: None,
-            height: None,
-            fps: None,
-            sample_rate: Some(sample_rate),
-            channels: Some(channels),
-            bit_rate: Some(bitrate_bps),
-            language: None,
-            pixel_format: None,
-            ..Default::default()
-        }],
-        chapters: Vec::new(),
-    })
+        offset,
+    ))
 }
 
 fn try_parse_adts(data: &[u8], path_label: &str) -> Option<MediaInfo> {

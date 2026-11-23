@@ -842,7 +842,7 @@ pub(crate) fn wrap_box(tag: &[u8; 4], body: &[u8]) -> Vec<u8> {
     out
 }
 
-fn build_mvhd(timescale: u32, duration: u32, next_track_id: u32) -> Vec<u8> {
+pub(crate) fn build_mvhd(timescale: u32, duration: u32, next_track_id: u32) -> Vec<u8> {
     let mut b = vec![0u8; 100];
     b[12..16].copy_from_slice(&timescale.to_be_bytes());
     b[16..20].copy_from_slice(&duration.to_be_bytes());

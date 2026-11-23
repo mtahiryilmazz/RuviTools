@@ -4,6 +4,9 @@ use std::time::Instant;
 
 use tokio_util::sync::CancellationToken;
 
+use crate::backend::native::audio_transcode::{
+    AudioTranscodeOptions, parse_mp3_bitrate_spec, transcode_audio_to_mp3, transcode_audio_to_wav,
+};
 use crate::backend::native::container_probe::probe_media_file;
 use crate::backend::native::ebml::{
     EbmlBuildSpec, build_ebml_bytes, build_ebml_colour_element, build_ebml_projection_element,
@@ -86,11 +89,13 @@ pub async fn execute_native_plan(
             .and_then(parse_timestamp_seconds)
             .unwrap_or(0.0);
         if let Some(d) = plan.duration_seconds {
-            d.min((src_dur - start_s).max(0.1))
+            if info.container.duration_seconds.is_some() && src_dur > start_s {
+                d.min((src_dur - start_s).max(0.1))
+            } else {
+                d.max(0.1)
+            }
         } else if let Some(ref end_str) = plan.end_time {
-            let end_s = parse_timestamp_seconds(end_str)
-                .unwrap_or(src_dur)
-                .min(src_dur);
+            let end_s = parse_timestamp_seconds(end_str).unwrap_or(src_dur);
             (end_s - start_s).max(0.1)
         } else {
             src_dur
@@ -164,40 +169,82 @@ pub async fn execute_native_plan(
             .1
             .saturating_sub(sec_probed.payload_slice.0)) as u64;
 
-        match plan.container {
+        // Prefer real lossless interleaving of genuine adaptive sources (DASH fMP4 / WebM).
+        let real_muxed = match plan.container {
             ContainerFormat::Mp4 | ContainerFormat::Mov | ContainerFormat::M4a => {
-                multiplex_mp4_dual_input(
+                crate::backend::native::dual_mux::try_mux_fmp4(
                     &mut src_file,
                     &mut sec_file,
                     &mut out_file,
-                    &effective_video,
-                    &sec_audio_info,
-                    probed.payload_slice.0 as u64,
-                    v_len,
-                    sec_probed.payload_slice.0 as u64,
-                    a_len,
-                    effective_duration,
-                )?;
+                )?
             }
             ContainerFormat::Mkv | ContainerFormat::Webm => {
-                multiplex_ebml_dual_input(
+                crate::backend::native::dual_mux::try_mux_webm(
                     &mut src_file,
                     &mut sec_file,
                     &mut out_file,
-                    &effective_video,
-                    &sec_audio_info,
-                    probed.payload_slice.0 as u64,
-                    v_len,
-                    sec_probed.payload_slice.0 as u64,
-                    a_len,
-                    effective_duration,
-                )?;
+                )?
             }
-            _ => {
-                return Err(RuviError::Unsupported(format!(
-                    "dual-input remuxing not supported for container {:?}",
-                    plan.container
-                )));
+            _ => false,
+        };
+
+        if !real_muxed {
+            // Prefer real lossless interleaving of genuine adaptive sources (DASH fMP4 / WebM).
+            let real_muxed = match plan.container {
+                ContainerFormat::Mp4 | ContainerFormat::Mov | ContainerFormat::M4a => {
+                    crate::backend::native::dual_mux::try_mux_fmp4(
+                        &mut src_file,
+                        &mut sec_file,
+                        &mut out_file,
+                    )?
+                }
+                ContainerFormat::Mkv | ContainerFormat::Webm => {
+                    crate::backend::native::dual_mux::try_mux_webm(
+                        &mut src_file,
+                        &mut sec_file,
+                        &mut out_file,
+                    )?
+                }
+                _ => false,
+            };
+
+            if !real_muxed {
+                match plan.container {
+                    ContainerFormat::Mp4 | ContainerFormat::Mov | ContainerFormat::M4a => {
+                        multiplex_mp4_dual_input(
+                            &mut src_file,
+                            &mut sec_file,
+                            &mut out_file,
+                            &effective_video,
+                            &sec_audio_info,
+                            probed.payload_slice.0 as u64,
+                            v_len,
+                            sec_probed.payload_slice.0 as u64,
+                            a_len,
+                            effective_duration,
+                        )?;
+                    }
+                    ContainerFormat::Mkv | ContainerFormat::Webm => {
+                        multiplex_ebml_dual_input(
+                            &mut src_file,
+                            &mut sec_file,
+                            &mut out_file,
+                            &effective_video,
+                            &sec_audio_info,
+                            probed.payload_slice.0 as u64,
+                            v_len,
+                            sec_probed.payload_slice.0 as u64,
+                            a_len,
+                            effective_duration,
+                        )?;
+                    }
+                    _ => {
+                        return Err(RuviError::Unsupported(format!(
+                            "dual-input remuxing not supported for container {:?}",
+                            plan.container
+                        )));
+                    }
+                }
             }
         }
         out_file.flush()?;
@@ -219,6 +266,59 @@ pub async fn execute_native_plan(
             hwaccel_fallback_reason: plan.hwaccel_fallback_reason.clone(),
             duration_ms: start.elapsed().as_millis() as u64,
         });
+    }
+
+    // REAL STREAMING AUDIO TRANSCODING: MP3 / WAV via Symphonia + rusty_mp3
+    if matches!(
+        plan.operation,
+        OperationKind::ExtractAudio | OperationKind::Convert
+    ) && matches!(plan.container, ContainerFormat::Mp3 | ContainerFormat::Wav)
+    {
+        let (bitrate_kbps, vbr_quality) = parse_mp3_bitrate_spec(plan.audio_bitrate.as_deref());
+        let stem_hint = plan
+            .final_output
+            .file_stem()
+            .or_else(|| plan.input.file_stem())
+            .and_then(|s| s.to_str())
+            .unwrap_or("Audio");
+        let opts = AudioTranscodeOptions {
+            bitrate_kbps,
+            vbr_quality,
+            start_seconds: plan.start_time.as_deref().and_then(parse_timestamp_seconds),
+            duration_seconds: plan.duration_seconds,
+            metadata: crate::backend::native::audio_transcode::parse_smart_title_metadata(
+                stem_hint, None, None,
+            ),
+        };
+        let encoded = match plan.container {
+            ContainerFormat::Mp3 => {
+                transcode_audio_to_mp3(&plan.input, &mut out_file, &opts, progress, &cancel)?
+            }
+            ContainerFormat::Wav => {
+                transcode_audio_to_wav(&plan.input, &mut out_file, &opts, progress, &cancel)?
+            }
+            _ => false,
+        };
+        if encoded {
+            out_file.flush()?;
+            emit_tick(progress, effective_duration, 0.75);
+            progress.on_progress(ProgressUpdate {
+                out_time_us: Some((effective_duration * 1_000_000.0) as u64),
+                fps: None,
+                speed: Some("native-audio".to_string()),
+                finished: true,
+            });
+            return Ok(ExecutionReport {
+                exit_code: 0,
+                stderr_tail: Vec::new(),
+                selected_video_encoder: None,
+                selected_audio_encoder: plan.audio_encoder.clone(),
+                hwaccel_requested: plan.hwaccel_requested.as_str().to_string(),
+                hwaccel_used: None,
+                hwaccel_fallback_reason: None,
+                duration_ms: start.elapsed().as_millis() as u64,
+            });
+        }
     }
 
     // GENUINE AUDIO DEMUXING: AAC ADTS
@@ -253,8 +353,11 @@ pub async fn execute_native_plan(
         }
     }
 
-    // SINGLE INPUT MP4 FASTSTART REMUX
-    if plan.operation == OperationKind::Remux
+    // SINGLE INPUT MP4/M4A FASTSTART REMUX (also handles large M4A audio-only extraction)
+    if (plan.operation == OperationKind::Remux
+        || (plan.operation == OperationKind::ExtractAudio
+            && plan.container == ContainerFormat::M4a
+            && src_video.is_none()))
         && matches!(
             plan.container,
             ContainerFormat::Mp4 | ContainerFormat::Mov | ContainerFormat::M4a
@@ -280,6 +383,54 @@ pub async fn execute_native_plan(
             hwaccel_fallback_reason: None,
             duration_ms: start.elapsed().as_millis() as u64,
         });
+    }
+
+    // LOSSLESS FRAGMENT/CLUSTER-ACCURATE TRIM FOR FMP4 & WEBM/MKV
+    if plan.operation == OperationKind::Trim {
+        let start_s = plan
+            .start_time
+            .as_deref()
+            .and_then(parse_timestamp_seconds)
+            .unwrap_or(0.0);
+        let trimmed_ok = match plan.container {
+            ContainerFormat::Mp4 | ContainerFormat::Mov | ContainerFormat::M4a => {
+                crate::backend::native::dual_mux::try_trim_fmp4(
+                    &mut src_file,
+                    &mut out_file,
+                    start_s,
+                    effective_duration,
+                )?
+            }
+            ContainerFormat::Webm | ContainerFormat::Mkv => {
+                crate::backend::native::dual_mux::try_trim_webm(
+                    &mut src_file,
+                    &mut out_file,
+                    start_s,
+                    effective_duration,
+                )?
+            }
+            _ => false,
+        };
+        if trimmed_ok {
+            out_file.flush()?;
+            emit_tick(progress, effective_duration, 0.75);
+            progress.on_progress(ProgressUpdate {
+                out_time_us: Some((effective_duration * 1_000_000.0) as u64),
+                fps: Some(30.0),
+                speed: Some("native-trim".to_string()),
+                finished: true,
+            });
+            return Ok(ExecutionReport {
+                exit_code: 0,
+                stderr_tail: Vec::new(),
+                selected_video_encoder: plan.video_encoder.clone(),
+                selected_audio_encoder: plan.audio_encoder.clone(),
+                hwaccel_requested: plan.hwaccel_requested.as_str().to_string(),
+                hwaccel_used: None,
+                hwaccel_fallback_reason: None,
+                duration_ms: start.elapsed().as_millis() as u64,
+            });
+        }
     }
 
     // ALL OTHER SINGLE-INPUT PATHS

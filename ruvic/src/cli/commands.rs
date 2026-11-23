@@ -162,6 +162,9 @@ pub async fn dispatch(cli: Cli) -> RuviResult<()> {
                     copy: args.copy,
                     overwrite: args.overwrite,
                     audio_stream: args.audio_stream,
+                    bitrate: args.bitrate,
+                    start: None,
+                    duration: None,
                 },
                 show_progress,
             )

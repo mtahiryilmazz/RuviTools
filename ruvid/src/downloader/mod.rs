@@ -6,4 +6,4 @@ pub mod scheduler;
 pub mod segment_worker;
 pub mod throttle;
 
-pub use engine::{execute_download, simulate_download};
+pub use engine::{execute_download, execute_download_with_progress, simulate_download};

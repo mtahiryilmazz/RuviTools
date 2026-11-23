@@ -628,3 +628,172 @@ fn native_corrupt_and_invalid_inputs_fail_with_integrity_code_8_and_clean_temp()
     assert_eq!(std::fs::read(&protected).unwrap(), sentinel);
     assert_no_temp_files(tmp.path());
 }
+
+fn build_pcm_wav_sine(sample_rate: u32, channels: u16, duration_s: f64, freq_hz: f64) -> Vec<u8> {
+    let total_frames = (f64::from(sample_rate) * duration_s).round() as usize;
+    let data_bytes = total_frames * usize::from(channels) * 2;
+    let block_align = channels * 2;
+    let byte_rate = sample_rate * u32::from(block_align);
+
+    let mut out = Vec::with_capacity(44 + data_bytes);
+    out.extend_from_slice(b"RIFF");
+    out.extend_from_slice(&(36 + data_bytes as u32).to_le_bytes());
+    out.extend_from_slice(b"WAVE");
+    out.extend_from_slice(b"fmt ");
+    out.extend_from_slice(&16u32.to_le_bytes());
+    out.extend_from_slice(&1u16.to_le_bytes());
+    out.extend_from_slice(&channels.to_le_bytes());
+    out.extend_from_slice(&sample_rate.to_le_bytes());
+    out.extend_from_slice(&byte_rate.to_le_bytes());
+    out.extend_from_slice(&block_align.to_le_bytes());
+    out.extend_from_slice(&16u16.to_le_bytes());
+    out.extend_from_slice(b"data");
+    out.extend_from_slice(&(data_bytes as u32).to_le_bytes());
+
+    for i in 0..total_frames {
+        let t = i as f64 / f64::from(sample_rate);
+        let val = (2.0 * std::f64::consts::PI * freq_hz * t).sin() * 0.4;
+        let sample = (val * 32767.0).round() as i16;
+        for _ in 0..channels {
+            out.extend_from_slice(&sample.to_le_bytes());
+        }
+    }
+    out
+}
+
+fn decode_mp3_stats(mp3_bytes: &[u8]) -> (u32, u16, usize, f64) {
+    let mut dec = rusty_mp3::Mp3Decoder::new();
+    dec.push(mp3_bytes);
+    dec.flush();
+    let mut sr = 0u32;
+    let mut ch = 0u16;
+    let mut samples = Vec::new();
+    while let Ok(frame) = dec.next_frame() {
+        sr = frame.sample_rate;
+        ch = frame.channels;
+        samples.extend_from_slice(&frame.samples);
+    }
+    let rms = if samples.is_empty() {
+        0.0
+    } else {
+        let sum_sq: f64 = samples.iter().map(|&s| f64::from(s) * f64::from(s)).sum();
+        (sum_sq / samples.len() as f64).sqrt()
+    };
+    (sr, ch, samples.len(), rms)
+}
+
+#[test]
+fn native_audio_real_wav_to_mp3_cbr_and_vbr_decodes_cleanly() {
+    let tmp = tempfile::tempdir().unwrap();
+    let wav_in = tmp.path().join("tone_2s.wav");
+    std::fs::write(&wav_in, build_pcm_wav_sine(44_100, 2, 2.0, 440.0)).unwrap();
+
+    for (bitrate, fname) in [
+        ("320k", "out_320.mp3"),
+        ("192k", "out_192.mp3"),
+        ("vbr", "out_vbr.mp3"),
+    ] {
+        let mp3_out = tmp.path().join(fname);
+        native_cmd(tmp.path())
+            .args([
+                "audio",
+                wav_in.to_str().unwrap(),
+                "--to",
+                "mp3",
+                "--bitrate",
+                bitrate,
+                "-o",
+                mp3_out.to_str().unwrap(),
+                "--json",
+            ])
+            .assert()
+            .success();
+
+        let mp3_bytes = std::fs::read(&mp3_out).unwrap();
+        assert!(
+            mp3_bytes.len() > 8_000,
+            "expected real MP3 audio for {bitrate}, got {} bytes",
+            mp3_bytes.len()
+        );
+
+        let info = probe_json(tmp.path(), &mp3_out);
+        assert_eq!(info.container.format_name, "mp3");
+        assert_eq!(info.streams[0].sample_rate, Some(44_100));
+        assert_eq!(info.streams[0].channels, Some(2));
+
+        let (sr, ch, sample_count, rms) = decode_mp3_stats(&mp3_bytes);
+        assert_eq!(sr, 44_100);
+        assert_eq!(ch, 2);
+        assert!(
+            sample_count >= 44_100 * 2,
+            "expected ~2s stereo PCM samples, got {sample_count}"
+        );
+        assert!(
+            rms > 0.05,
+            "decoded MP3 should contain 440 Hz tone, rms={rms}"
+        );
+    }
+
+    // Verify sample-accurate audio slicing + WAV output
+    let backend = ruvic::backend::native::NativeMediaBackend::new();
+    let cfg = ruvic::config::RuvicConfig::default();
+    let sliced_mp3 = tmp.path().join("sliced_1s.mp3");
+    let sliced_wav = tmp.path().join("sliced_1s.wav");
+    let rt = tokio::runtime::Runtime::new().unwrap();
+    rt.block_on(async {
+        ruvic::operations::extract_audio::execute_extract_audio(
+            &backend,
+            &cfg,
+            ruvic::operations::extract_audio::ExtractAudioRequest {
+                input: wav_in.clone(),
+                output: sliced_mp3.clone(),
+                to: Some("mp3".to_string()),
+                copy: false,
+                overwrite: true,
+                audio_stream: None,
+                bitrate: Some("320k".to_string()),
+                start: Some("0.500".to_string()),
+                duration: Some(1.0),
+            },
+            false,
+        )
+        .await
+        .expect("sliced mp3");
+
+        ruvic::operations::extract_audio::execute_extract_audio(
+            &backend,
+            &cfg,
+            ruvic::operations::extract_audio::ExtractAudioRequest {
+                input: wav_in.clone(),
+                output: sliced_wav.clone(),
+                to: Some("wav".to_string()),
+                copy: false,
+                overwrite: true,
+                audio_stream: None,
+                bitrate: None,
+                start: Some("0.500".to_string()),
+                duration: Some(1.0),
+            },
+            false,
+        )
+        .await
+        .expect("sliced wav");
+    });
+
+    let (_, _, sliced_samples, sliced_rms) = decode_mp3_stats(&std::fs::read(&sliced_mp3).unwrap());
+    // ~1s stereo 44.1kHz = ~88,200 samples (+ encoder padding frames)
+    assert!(
+        (70_000..=115_000).contains(&sliced_samples),
+        "expected ~1s sliced MP3 samples (~88200), got {sliced_samples}"
+    );
+    assert!(sliced_rms > 0.05);
+
+    let wav_info = probe_json(tmp.path(), &sliced_wav);
+    assert_eq!(wav_info.container.format_name, "wav");
+    let wav_dur = wav_info.container.duration_seconds.unwrap_or(0.0);
+    assert!(
+        (wav_dur - 1.0).abs() <= 0.05,
+        "expected 1.0s sliced WAV, got {wav_dur}"
+    );
+    assert_no_temp_files(tmp.path());
+}

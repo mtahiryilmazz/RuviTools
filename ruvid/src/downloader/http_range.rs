@@ -11,6 +11,7 @@ use tokio::task::JoinSet;
 use tokio_util::sync::CancellationToken;
 
 use crate::domain::download_job::DownloadPlan;
+use crate::domain::media_manifest::redact_sensitive_url;
 use crate::downloader::retry::{RetryableError, run_with_retry};
 use crate::downloader::scheduler::DownloadScheduler;
 use crate::downloader::throttle::RateLimiter;
@@ -37,13 +38,19 @@ impl ChunkRange {
     }
 }
 
-pub fn plan_chunks(total_bytes: u64, jobs: usize) -> Vec<ChunkRange> {
+pub fn plan_chunks_for_url(total_bytes: u64, jobs: usize, ephemeral_cdn: bool) -> Vec<ChunkRange> {
     if total_bytes == 0 {
         return Vec::new();
     }
-    let chunk_size = if total_bytes >= 16 * 1024 {
+    let min_chunk = if ephemeral_cdn { 1024 * 1024 } else { 4096 };
+    let max_chunk = if ephemeral_cdn {
+        4 * 1024 * 1024
+    } else {
+        2 * 1024 * 1024
+    };
+    let chunk_size = if total_bytes >= min_chunk.max(16 * 1024) {
         let target_chunks = (jobs * 2).max(2) as u64;
-        (total_bytes.div_ceil(target_chunks)).clamp(4096, 2 * 1024 * 1024)
+        (total_bytes.div_ceil(target_chunks)).clamp(min_chunk, max_chunk)
     } else {
         total_bytes
     };
@@ -62,6 +69,50 @@ pub fn plan_chunks(total_bytes: u64, jobs: usize) -> Vec<ChunkRange> {
         idx += 1;
     }
     chunks
+}
+
+pub fn plan_chunks(total_bytes: u64, jobs: usize) -> Vec<ChunkRange> {
+    plan_chunks_for_url(total_bytes, jobs, false)
+}
+
+/// Returns true for short-lived signed CDN URLs whose query changes per resolve.
+pub(crate) fn is_ephemeral_signed_url(url: &str) -> bool {
+    let Ok(parsed) = url::Url::parse(url) else {
+        return false;
+    };
+    let host_signed = parsed.host_str().is_some_and(|h| {
+        let h = h.to_ascii_lowercase();
+        h == "googlevideo.com" || h.ends_with(".googlevideo.com")
+    });
+    let mut has_expire = false;
+    let mut has_sig = false;
+    for (k, _) in parsed.query_pairs() {
+        match k.as_ref() {
+            "expire" => has_expire = true,
+            "sig" | "signature" | "lsig" => has_sig = true,
+            _ => {}
+        }
+    }
+    host_signed || (has_expire && has_sig)
+}
+
+#[cfg(test)]
+mod ephemeral_tests {
+    use super::is_ephemeral_signed_url;
+
+    #[test]
+    fn detects_signed_cdn_urls() {
+        assert!(is_ephemeral_signed_url(
+            "https://rr3---sn-x.googlevideo.com/videoplayback?itag=140"
+        ));
+        assert!(is_ephemeral_signed_url(
+            "https://cdn.example.com/a.mp4?expire=1&sig=abc"
+        ));
+        assert!(!is_ephemeral_signed_url("https://example.com/a.mp4"));
+        assert!(!is_ephemeral_signed_url(
+            "http://127.0.0.1:8080/resumable.mp4"
+        ));
+    }
 }
 
 pub fn parse_content_range_header(val: &str) -> Option<(u64, u64, Option<u64>)> {
@@ -170,9 +221,32 @@ pub async fn download_direct_http(
     }
 
     let total = total_bytes.unwrap_or(0);
-    let chunks = plan_chunks(total, plan.jobs);
+    let is_ephemeral = is_ephemeral_signed_url(url);
+    // YouTube iOS/Android `svpuc=1` signed streams reject concurrent out-of-order range bursts
+    // from the same IP with HTTP 403; use sequential keep-alive chunks (1 worker) on `svpuc=1`
+    // while keeping full `--jobs` concurrency for standard HTTP, DASH, and AndroidVR streams.
+    let effective_jobs = if url.contains("svpuc=1") {
+        1
+    } else {
+        plan.jobs.max(1)
+    };
+    let chunks = plan_chunks_for_url(total, effective_jobs, is_ephemeral);
     let chunks_total = chunks.len();
     let chunk_size = chunks.first().map(|c| c.len()).unwrap_or(total);
+
+    // Signed CDN URLs (googlevideo.com, expire+sig) change on every resolve; a stale
+    // checkpoint for them can never be resumed, so reset instead of failing.
+    if plan.resume
+        && ckpt_path.exists()
+        && is_ephemeral_signed_url(url)
+        && let Ok(Some(old)) = DownloadCheckpoint::load(&ckpt_path)
+        && old
+            .verify_identity(url, &plan.stream.id, None, None, None)
+            .is_err()
+    {
+        let _ = std::fs::remove_file(&part_path);
+        let _ = std::fs::remove_file(&ckpt_path);
+    }
 
     let ckpt = if plan.resume && ckpt_path.exists() {
         let loaded = DownloadCheckpoint::load(&ckpt_path)?.ok_or_else(|| {
@@ -239,7 +313,7 @@ pub async fn download_direct_http(
             OpenOptions::new().read(true).write(true).open(&part_path)?,
         ));
         let ckpt_arc = Arc::new(Mutex::new(ckpt));
-        let scheduler = DownloadScheduler::new(plan.jobs);
+        let scheduler = DownloadScheduler::new(effective_jobs);
 
         // Verify range behavior on the very first pending chunk before launching remaining parallel jobs
         // so servers that ignore Range (returning 200 OK) trigger a clean single-stream fallback.
@@ -373,6 +447,12 @@ async fn download_one_chunk(
                 )));
             }
             if status != StatusCode::PARTIAL_CONTENT {
+                if status == StatusCode::FORBIDDEN && is_ephemeral_signed_url(final_url.as_str()) {
+                    return Err(RetryableError::Transient(RuviError::Network(format!(
+                        "HTTP 403 for {}",
+                        redact_sensitive_url(final_url.as_str())
+                    ))));
+                }
                 return Err(RetryableError::from_status(status, final_url.as_str()));
             }
 

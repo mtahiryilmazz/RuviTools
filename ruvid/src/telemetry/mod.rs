@@ -1,3 +1,3 @@
 pub mod progress;
 
-pub use progress::DownloadProgress;
+pub use progress::{DownloadProgress, ProgressCallback};

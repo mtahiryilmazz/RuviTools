@@ -20,7 +20,7 @@ use crate::resolver::ResolveContext;
 use crate::resolver::platform::youtube::{convert_subtitle_payload, parse_timestamp_seconds};
 use crate::resolver::registry::ResolverRegistry;
 use crate::storage::{ensure_writable_destination, resolve_output_path, sanitize_filename};
-use crate::telemetry::DownloadProgress;
+use crate::telemetry::{DownloadProgress, ProgressCallback};
 
 pub async fn simulate_download(
     config: &RuvidConfig,
@@ -150,6 +150,88 @@ pub async fn execute_download(
     job: DownloadJob,
     show_progress: bool,
 ) -> RuviResult<DownloadOutcome> {
+    execute_download_with_progress(config, job, show_progress, None).await
+}
+
+pub async fn execute_download_with_progress(
+    config: &RuvidConfig,
+    job: DownloadJob,
+    show_progress: bool,
+    on_progress: Option<ProgressCallback>,
+) -> RuviResult<DownloadOutcome> {
+    let is_yt = url::Url::parse(&job.url)
+        .ok()
+        .is_some_and(|u| crate::resolver::platform::youtube::is_youtube_url(&u));
+
+    let mut last_err =
+        match execute_download_inner(config, job.clone(), show_progress, on_progress.clone(), 0)
+            .await
+        {
+            Ok(outcome) => return Ok(outcome),
+            Err(RuviError::Network(ref msg)) if is_yt && msg.contains("403") => {
+                RuviError::Network(msg.clone())
+            }
+            Err(err) => return Err(err),
+        };
+
+    // If the default WAN interface is throttled or IP-blocked by YouTube's edge node (HTTP 403),
+    // automatically fail over across available local WAN interfaces on multi-homed systems first
+    // so the fastest ANDROID_VR profile can complete immediately on a clean WAN route.
+    if is_yt && std::env::var_os("RUVID_SOURCE_ADDRESS").is_none() {
+        let prev_preferred = crate::resolver::get_preferred_local_ipv4();
+        for cand_ip in crate::resolver::local_wan_ipv4_candidates() {
+            if Some(cand_ip) == prev_preferred {
+                continue;
+            }
+            crate::resolver::set_preferred_local_ipv4(Some(cand_ip));
+            let mut wan_job = job.clone();
+            wan_job.resume = false;
+            match execute_download_inner(config, wan_job, show_progress, on_progress.clone(), 0)
+                .await
+            {
+                Ok(outcome) => return Ok(outcome),
+                Err(RuviError::Network(ref msg)) if msg.contains("403") => {
+                    last_err = RuviError::Network(msg.clone());
+                }
+                Err(RuviError::Unsupported(_)) => {}
+                Err(_) => {}
+            }
+        }
+        crate::resolver::set_preferred_local_ipv4(prev_preferred);
+    }
+
+    for skip in 1..=2 {
+        let mut retry_job = job.clone();
+        // Reset resume state and step down concurrency before switching Innertube client profiles
+        // so fresh signed CDN URLs never collide with stale partial checkpoints or burst limits.
+        retry_job.resume = false;
+        retry_job.jobs = if skip == 1 {
+            (job.jobs / 2).clamp(1, 2)
+        } else {
+            1
+        };
+        match execute_download_inner(config, retry_job, show_progress, on_progress.clone(), skip)
+            .await
+        {
+            Ok(outcome) => return Ok(outcome),
+            Err(RuviError::Network(ref msg)) if msg.contains("403") => {
+                last_err = RuviError::Network(msg.clone());
+            }
+            Err(RuviError::Unsupported(_)) => {}
+            Err(err) => return Err(err),
+        }
+    }
+
+    Err(last_err)
+}
+
+async fn execute_download_inner(
+    config: &RuvidConfig,
+    job: DownloadJob,
+    show_progress: bool,
+    on_progress: Option<ProgressCallback>,
+    skip_yt_profiles: usize,
+) -> RuviResult<DownloadOutcome> {
     if job.write_manifest.as_deref() == Some(Path::new("-")) {
         let msg = if job.to_stdout {
             "--stdout cannot be combined with --write-manifest -"
@@ -175,7 +257,16 @@ pub async fn execute_download(
         job.retry_count,
     )?;
 
-    let source = ResolverRegistry::resolve(&ctx, &job.url).await?;
+    let source = if skip_yt_profiles > 0 {
+        crate::resolver::platform::youtube::resolve_youtube_url_skipping(
+            &ctx,
+            &job.url,
+            skip_yt_profiles,
+        )
+        .await?
+    } else {
+        ResolverRegistry::resolve(&ctx, &job.url).await?
+    };
     let ctx = if let Some(ref ua_override) = source.user_agent_override {
         ResolveContext::build(
             ua_override,
@@ -268,26 +359,57 @@ pub async fn execute_download(
         let cancel = CancellationToken::new();
         spawn_ctrl_c_listener(cancel.clone());
         let limiter = RateLimiter::new(rate_limit_bps);
-        let progress = DownloadProgress::new(show_progress, combined_total, &source.title);
+        let progress = DownloadProgress::with_callback(
+            show_progress,
+            combined_total,
+            &source.title,
+            on_progress.clone(),
+        );
 
-        let (v_stats, a_stats) = tokio::try_join!(
-            dispatch_stream_download(
+        let is_svpuc_dual = [&video_stream.payload, &audio_stream.payload]
+            .iter()
+            .any(|p| matches!(p, StreamPayload::DirectHttp { url, .. } if url.contains("svpuc=1")));
+
+        let (v_stats, a_stats) = if is_svpuc_dual {
+            let v = dispatch_stream_download(
                 &ctx,
                 &video_plan,
                 video_stream,
                 &progress,
                 &limiter,
-                &cancel
-            ),
-            dispatch_stream_download(
+                &cancel,
+            )
+            .await?;
+            let a = dispatch_stream_download(
                 &ctx,
                 &audio_plan,
                 audio_stream,
                 &progress,
                 &limiter,
-                &cancel
-            ),
-        )?;
+                &cancel,
+            )
+            .await?;
+            (v, a)
+        } else {
+            tokio::try_join!(
+                dispatch_stream_download(
+                    &ctx,
+                    &video_plan,
+                    video_stream,
+                    &progress,
+                    &limiter,
+                    &cancel
+                ),
+                dispatch_stream_download(
+                    &ctx,
+                    &audio_plan,
+                    audio_stream,
+                    &progress,
+                    &limiter,
+                    &cancel
+                ),
+            )?
+        };
 
         progress.finish();
 
@@ -399,8 +521,12 @@ pub async fn execute_download(
     let cancel = CancellationToken::new();
     spawn_ctrl_c_listener(cancel.clone());
     let limiter = RateLimiter::new(plan.rate_limit_bps);
-    let progress =
-        DownloadProgress::new(show_progress && !job.to_stdout, total_bytes, &source.title);
+    let progress = DownloadProgress::with_callback(
+        show_progress && !job.to_stdout,
+        total_bytes,
+        &source.title,
+        on_progress,
+    );
 
     let stats =
         dispatch_stream_download(&ctx, &plan, &selected, &progress, &limiter, &cancel).await?;
@@ -605,6 +731,20 @@ fn find_ruvic_binary() -> Option<PathBuf> {
             }
         }
     }
+    if let Some(local) = std::env::var_os("LOCALAPPDATA") {
+        let installed = PathBuf::from(local).join("RuviTube").join(exe_name);
+        if installed.is_file() {
+            return Some(installed);
+        }
+    }
+    if let Some(path_var) = std::env::var_os("PATH") {
+        for dir in std::env::split_paths(&path_var) {
+            let candidate = dir.join(exe_name);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
     None
 }
 
@@ -614,9 +754,15 @@ fn remux_dual_streams(
     output_path: &Path,
     keep_parts: bool,
 ) -> RuviResult<()> {
-    let mut remuxed = false;
+    let cleanup = || {
+        if !keep_parts {
+            let _ = std::fs::remove_file(video_part);
+            let _ = std::fs::remove_file(audio_part);
+        }
+    };
+
     if let Some(ruvic_bin) = find_ruvic_binary() {
-        let status = std::process::Command::new(ruvic_bin)
+        let output = std::process::Command::new(&ruvic_bin)
             .args([
                 "remux",
                 "--video",
@@ -628,23 +774,41 @@ fn remux_dual_streams(
                 "--overwrite",
                 "-q",
             ])
-            .status();
-        if let Ok(st) = status
-            && st.success()
-            && output_path.is_file()
-        {
-            remuxed = true;
+            .output();
+        match output {
+            Ok(out) if out.status.success() && output_path.is_file() => {
+                cleanup();
+                return Ok(());
+            }
+            Ok(out) => {
+                let stderr = String::from_utf8_lossy(&out.stderr).trim().to_string();
+                let detail = if stderr.is_empty() {
+                    String::from_utf8_lossy(&out.stdout).trim().to_string()
+                } else {
+                    stderr
+                };
+                cleanup();
+                return Err(RuviError::General(format!(
+                    "ruvic dual-stream remux failed (exit {:?}): {detail}",
+                    out.status.code()
+                )));
+            }
+            Err(err) => {
+                cleanup();
+                return Err(RuviError::General(format!(
+                    "failed invoking ruvic remux ({}): {err}",
+                    ruvic_bin.display()
+                )));
+            }
         }
     }
 
-    if !remuxed && video_part.is_file() {
+    // Fallback when running isolated ruvid builds without ruvic.exe nearby.
+    if video_part.is_file() {
         std::fs::copy(video_part, output_path)?;
     }
 
-    if !keep_parts {
-        let _ = std::fs::remove_file(video_part);
-        let _ = std::fs::remove_file(audio_part);
-    }
+    cleanup();
     Ok(())
 }
 

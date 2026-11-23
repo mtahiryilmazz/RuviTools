@@ -1,15 +1,8 @@
 /*
- * GeTube — service worker.
+ * RuviTube — MV3 Service Worker.
  *
- * Sorumluluklar:
- *  - Content script isteklerini doğrulamak (url, kalite, kesit aralığı).
- *  - Native Host portunu YÖNETMEK. Not: chrome.runtime.connectNative yalnızca
- *    service worker'da tutulur (v1.0.8 ile aynı yöntem).
- *  - chrome.downloads çağrılarını yapmak.
- *  - İş kayıtlarını chrome.storage.session üzerinde tutmak.
- *
- * MV3 notu: service worker 30 sn boşta sonlandırılabilir; v1.0.8'deki gibi port SW'de
- * tutulur, indirme sürerken yt-dlp çıktısı portu canlı tutar.
+ * Manages Native Messaging ports (com.ruvitube.nativehost), download queue,
+ * format/quality normalization, and optional probe fallback.
  */
 'use strict';
 
@@ -19,15 +12,18 @@ const SETTINGS_KEY = 'ruvitube.settings';
 const MAX_ACTIVE = 2;
 const JOB_TTL_MS = 6 * 60 * 60 * 1000;
 
-// Tanı: çalışan service worker sürümü (destek için).
-chrome.storage.session.set({ 'ruvitube.bgVersion': 'sw-2.0.0-ruvi' }).catch(() => {});
+chrome.storage.session.set({ 'ruvitube.bgVersion': 'sw-2.1.0-ruvi' }).catch(() => {});
 
-const VIDEO_QUALITIES = ['1080p', '720p', '480p', 'best'];
-const AUDIO_QUALITIES = ['320kbps', '192kbps'];
+const VIDEO_QUALITIES = [
+  'best', 'h264', 'mp4-h264', '4320p60', '4320p', '2160p60', '2160p',
+  '1440p60', '1440p', '1080p60', '1080p', '720p60', '720p', '480p', '360p', '240p', '144p'
+];
+const AUDIO_QUALITIES = ['320kbps', '256kbps', '192kbps', '128kbps', 'vbr', 'original'];
+const MEDIA_TYPES = ['Video', 'MP3', 'M4A', 'OPUS', 'WAV', 'AAC'];
 
 let jobsCache = null;
 let lock = Promise.resolve();
-const nativePorts = new Map(); // jobId -> port
+const nativePorts = new Map();
 
 function withLock(fn) {
   const run = lock.then(fn, fn);
@@ -69,19 +65,17 @@ async function getSettings() {
     openDownloads: false,
     openFile: false,
     openFolder: false,
-    videoQuality: '720p',
+    videoQuality: '1080p',
     audioQuality: '320kbps',
     clipLength: 30,
     jobs: DEFAULT_JOBS,
-    jobsCount: '4',
     rememberClip: true,
-    showStatus: true
+    showStatus: true,
+    showFloatingPill: true
   }, s);
   merged.jobs = normalizeJobs(s.jobs !== undefined ? s.jobs : s.jobsCount);
   return merged;
 }
-
-/* ---------------------------------------------------------------- helpers */
 
 function sendToTab(tabId, message) {
   if (tabId === null || tabId === undefined) return;
@@ -97,19 +91,21 @@ function openDownloadsPage() {
   const url = isFirefoxBrowser() ? 'about:downloads' : 'chrome://downloads/';
   try {
     Promise.resolve(chrome.tabs.create({ url })).catch(() => {
-      try { chrome.downloads.showDefaultFolder(); } catch (_) { /* yoksay */ }
+      try { chrome.downloads.showDefaultFolder(); } catch (_) {}
     });
   } catch (_) {
-    try { chrome.downloads.showDefaultFolder(); } catch (_) { /* yoksay */ }
+    try { chrome.downloads.showDefaultFolder(); } catch (_) {}
   }
 }
 
 function isYoutubeUrl(url) {
-  return /^https:\/\/www\.youtube\.com\/watch\?(?:[^#]*&)?v=[\w-]{6,20}(?:[&#].*)?$/.test(url || '');
+  if (typeof url !== 'string' || url.length > 2048) return false;
+  return /^https:\/\/(?:www\.|m\.|music\.)?youtube\.com\/(?:watch\?(?:[^#]*&)?v=[\w-]{6,20}|shorts\/[\w-]{6,20}|live\/[\w-]{6,20}|embed\/[\w-]{6,20})(?:[?&#].*)?$/.test(url)
+    || /^https:\/\/youtu\.be\/[\w-]{6,20}(?:[?&#].*)?$/.test(url);
 }
 
 function isFiniteNumber(v) {
-  return typeof v === 'number' && isFinite(v);
+  return typeof v === 'number' && Number.isFinite(v);
 }
 
 function normalizeClip(clip) {
@@ -129,9 +125,23 @@ function normalizeClip(clip) {
   return out;
 }
 
+function normalizeMediaType(raw) {
+  const found = MEDIA_TYPES.find(t => t.toLowerCase() === String(raw || '').toLowerCase());
+  return found || 'Video';
+}
+
 function normalizeQuality(type, quality) {
-  const list = type === 'MP3' ? AUDIO_QUALITIES : VIDEO_QUALITIES;
-  return list.indexOf(quality) >= 0 ? quality : list[list.length - 1];
+  const q = String(quality || '').trim();
+  if (type === 'Video') {
+    if (/^itag-\d{1,6}(?:-[a-z0-9]{1,8})?(?:\|\d{3,4}p(?:60)?(?::(?:mp4|webm))?)?$/i.test(q)) {
+      return q.toLowerCase();
+    }
+    return VIDEO_QUALITIES.includes(q.toLowerCase()) ? q.toLowerCase() : 'best';
+  }
+  if (type === 'MP3') {
+    return AUDIO_QUALITIES.includes(q.toLowerCase()) ? q.toLowerCase() : '320kbps';
+  }
+  return 'original';
 }
 
 function stampShort(seconds) {
@@ -141,12 +151,22 @@ function stampShort(seconds) {
 }
 
 function labelFor(type, quality, clip) {
-  const q = type === 'MP3'
-    ? quality.replace('kbps', 'k')
-    : (quality === 'best' ? 'En iyi' : quality);
-  const base = (type === 'MP3' ? 'MP3 ' : 'MP4 ') + q;
+  let base;
+  if (type === 'MP3') {
+    const q = quality === 'vbr' ? 'VBR' : quality.replace('kbps', 'k');
+    base = 'MP3 ' + q;
+  } else if (type === 'M4A' || type === 'OPUS' || type === 'WAV' || type === 'AAC') {
+    base = type;
+  } else {
+    const q = quality === 'best' ? 'En iyi' : (quality.includes('|') ? quality.split('|')[1].split(':')[0] : quality);
+    base = 'Video ' + q;
+  }
   if (!clip) return base;
-  return base + ' ✂ ' + stampShort(clip.startSec) + '–' + stampShort(clip.endSec);
+  const range = stampShort(clip.startSec) + '–' + stampShort(clip.endSec);
+  if (clip.chapterTitle) {
+    return clip.chapterTitle + ' · ' + base + ' (' + range + ')';
+  }
+  return base + ' ✂ ' + range;
 }
 
 function activeCount(jobs) {
@@ -156,10 +176,8 @@ function activeCount(jobs) {
 function updateBadge(jobs) {
   const n = activeCount(jobs);
   chrome.action.setBadgeText({ text: n > 0 ? String(n) : '' }).catch(() => {});
-  chrome.action.setBadgeBackgroundColor({ color: '#cc0000' }).catch(() => {});
+  chrome.action.setBadgeBackgroundColor({ color: '#2f81f7' }).catch(() => {});
 }
-
-/* ------------------------------------------------------------------ jobs */
 
 function publicJob(job) {
   return {
@@ -172,9 +190,11 @@ function publicJob(job) {
     state: job.state,
     percent: job.percent || 0,
     status: job.status || '',
+    speed: job.speed || '',
     ok: job.ok,
     error: job.error || '',
-    fileName: job.fileName || ''
+    fileName: job.fileName || '',
+    filePath: job.filePath || ''
   };
 }
 
@@ -199,7 +219,7 @@ function disposePort(jobId) {
   const port = nativePorts.get(jobId);
   if (!port) return;
   nativePorts.delete(jobId);
-  try { port.disconnect(); } catch (_) { /* yoksay */ }
+  try { port.disconnect(); } catch (_) {}
 }
 
 async function finishJob(jobId, patch) {
@@ -215,7 +235,7 @@ async function finishJob(jobId, patch) {
       if (items && items[0] && items[0].filename) {
         job = (await patchJob(jobId, { filePath: items[0].filename })) || job;
       }
-    } catch (_) { /* yol alınamazsa dosyayı açma atlanır */ }
+    } catch (_) {}
   }
 
   disposePort(jobId);
@@ -228,17 +248,17 @@ async function afterDownload(job) {
   const settings = await getSettings();
   if (settings.openFile) {
     if (job.downloadId !== undefined) {
-      try { await chrome.downloads.open(job.downloadId); } catch (_) { /* yoksay */ }
+      try { await chrome.downloads.open(job.downloadId); } catch (_) {}
     } else if (job.filePath) {
-      try { await shellNative('open_file', job.filePath); } catch (_) { /* yoksay */ }
+      try { await shellNative('open_file', job.filePath); } catch (_) {}
     }
   }
   if (settings.openFolder) {
     if (job.downloadId !== undefined) {
       try { await chrome.downloads.show(job.downloadId); }
-      catch (_) { try { chrome.downloads.showDefaultFolder(); } catch (_) { /* yoksay */ } }
+      catch (_) { try { chrome.downloads.showDefaultFolder(); } catch (_) {} }
     } else {
-      try { await shellNative('open_folder', ''); } catch (_) { /* yoksay */ }
+      try { await shellNative('open_folder', ''); } catch (_) {}
     }
   }
   if (settings.openDownloads) openDownloadsPage();
@@ -259,8 +279,6 @@ async function promoteQueued() {
     setTimeout(() => startNativeJob(next), 0);
   });
 }
-
-/* -------------------------------------------------------- native messaging */
 
 function connectHost(jobId) {
   const port = chrome.runtime.connectNative(HOST);
@@ -290,8 +308,6 @@ async function startNativeJob(job) {
     const settings = await getSettings();
     const rawJobs = (job.jobs !== undefined && job.jobs !== null) ? job.jobs : settings.jobs;
     const jobs = normalizeJobs(rawJobs);
-    const settings = await getSettings();
-    const jobs = parseInt(settings.jobsCount || job.jobs || '4', 10) || 4;
     const port = connectHost(job.jobId);
     port.postMessage({
       action: 'download',
@@ -300,8 +316,9 @@ async function startNativeJob(job) {
       quality: job.quality,
       url: job.url,
       jobs,
-      jobs: jobs,
-      clip: job.clip || null
+      clip: job.clip || null,
+      channel: job.channel || '',
+      title: job.title || ''
     });
   } catch (e) {
     await finishJob(job.jobId, {
@@ -313,9 +330,47 @@ async function startNativeJob(job) {
   }
 }
 
-/* ------------------------------------------------------------- downloads */
+function probeNative(url) {
+  return new Promise((resolve, reject) => {
+    const jobId = 'probe-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8);
+    let port;
+    try { port = chrome.runtime.connectNative(HOST); }
+    catch (e) { reject(new Error((e && e.message) || 'Native Host başlatılamadı.')); return; }
 
-const downloadIndex = new Map(); // downloadId -> jobId
+    let settled = false;
+    const timer = setTimeout(() => {
+      finish(false, { ok: false, error: 'Akış çözümleme zaman aşımı.' });
+    }, 20000);
+
+    const finish = (ok, data) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { port.disconnect(); } catch (_) {}
+      if (ok) resolve(data);
+      else reject(new Error((data && data.error) || 'Çözümleme başarısız.'));
+    };
+
+    port.onMessage.addListener(msg => {
+      if (!msg) return;
+      if (msg.ok) finish(true, msg);
+      else finish(false, msg);
+    });
+
+    port.onDisconnect.addListener(() => {
+      const err = chrome.runtime.lastError;
+      finish(false, { error: (err && err.message) || 'Native Host kapandı.' });
+    });
+
+    try {
+      port.postMessage({ action: 'probe', jobId, url });
+    } catch (e) {
+      finish(false, { error: (e && e.message) || 'Probe isteği gönderilemedi.' });
+    }
+  });
+}
+
+const downloadIndex = new Map();
 
 async function startChromeDownload(job, fileUrl, fileName) {
   const safeName = String(fileName || 'ruvitube').replace(/[\\/:*?"<>|]+/g, '_').slice(0, 180);
@@ -350,8 +405,6 @@ chrome.downloads.onChanged.addListener(delta => {
     finishJob(jobId, { ok: false, percent: 0, status: 'Hata', error: 'Chrome indirme hatası: ' + reason });
   }
 });
-
-/* --------------------------------------------------------- native events */
 
 async function onNativeEvent(msg) {
   const jobId = msg.jobId;
@@ -392,8 +445,6 @@ async function onNativeEvent(msg) {
   }
 }
 
-/* ------------------------------------------------------- tek seferlik shell */
-
 function shellNative(op, filePath) {
   return new Promise((resolve, reject) => {
     let port;
@@ -403,7 +454,7 @@ function shellNative(op, filePath) {
     const done = (ok, error) => {
       if (settled) return;
       settled = true;
-      try { port.disconnect(); } catch (_) { /* yoksay */ }
+      try { port.disconnect(); } catch (_) {}
       ok ? resolve() : reject(new Error(error || 'İşlem başarısız.'));
     };
     port.onMessage.addListener(msg => {
@@ -419,12 +470,10 @@ function shellNative(op, filePath) {
   });
 }
 
-/* --------------------------------------------------------------- signals */
-
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!message) return;
 
-  if (message.target === 'getube-bg') {
+  if (message.target === 'getube-bg' || message.target === 'ruvitube-bg') {
     if (message.action === 'keepalive') { sendResponse({ ok: true }); return; }
     onNativeEvent(message).catch(() => {});
     sendResponse({ ok: true });
@@ -444,6 +493,18 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     shellNative(op, filePath)
       .then(() => sendResponse({ ok: true }))
       .catch(e => sendResponse({ ok: false, error: (e && e.message) || 'İşlem başarısız.' }));
+    return true;
+  }
+
+  if (message.action === 'probe_video') {
+    const url = String(message.url || '');
+    if (!isYoutubeUrl(url)) {
+      sendResponse({ ok: false, error: 'Geçerli bir YouTube adresi değil.' });
+      return;
+    }
+    probeNative(url)
+      .then(data => sendResponse({ ok: true, data }))
+      .catch(e => sendResponse({ ok: false, error: (e && e.message) || 'Çözümleme hatası.' }));
     return true;
   }
 
@@ -481,12 +542,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
-  if (message.action !== 'download') return;
+  if (message.action !== 'download' && message.action !== 'start_download') return;
 
-  const type = message.type === 'MP3' ? 'MP3' : 'Video';
+  const type = normalizeMediaType(message.type);
   const quality = normalizeQuality(type, String(message.quality || ''));
   const url = String(message.url || '');
   const clip = normalizeClip(message.clip);
+  const channel = typeof message.channel === 'string' ? message.channel.trim().slice(0, 120) : '';
+  const title = typeof message.title === 'string' ? message.title.trim().slice(0, 200) : '';
 
   if (!isYoutubeUrl(url)) {
     sendResponse({ ok: false, error: 'Geçerli bir YouTube video adresi bulunamadı.' });
@@ -515,7 +578,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       jobs: jobsCount,
       url,
       clip,
-      label: labelFor(type, quality, clip),
+      channel,
+      title,
+      label: message.label ? String(message.label).slice(0, 80) : labelFor(type, quality, clip),
       state: 'queued',
       percent: 0,
       status: 'Hazırlanıyor...',
@@ -537,7 +602,30 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   return true;
 });
 
+function refreshToolbarActionIcon() {
+  if (!chrome.action || typeof chrome.action.setIcon !== 'function') return;
+  try {
+    chrome.action.setIcon({
+      path: {
+        16: 'icon16.png',
+        32: 'icon32.png',
+        48: 'icon48.png',
+        128: 'icon128.png'
+      }
+    }).catch(() => {});
+  } catch (_) {}
+}
+
+refreshToolbarActionIcon();
+
+if (chrome.runtime && chrome.runtime.onStartup) {
+  chrome.runtime.onStartup.addListener(() => {
+    refreshToolbarActionIcon();
+  });
+}
+
 chrome.runtime.onInstalled.addListener(() => {
+  refreshToolbarActionIcon();
   withLock(async () => {
     const jobs = await getJobs();
     for (const job of Object.values(jobs)) {

@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "RuviTube",
-  "version": "2.0.0",
-  "description": "RuviTube v2.0 (RuviTools Saf Rust Motoru): YouTube videolarını, seslerini ve seçilen zaman aralığını (klip) yüksek hızla indir.",
+  "version": "2.1.0",
+  "description": "RuviTube v2.1 (RuviTools Saf Rust Motoru): YouTube videolarını 4K/8K, otomatik MP3 (320k/192k/VBR) ve kesit halinde yüksek hızla indir.",
   "default_locale": "tr",
   "minimum_chrome_version": "116",
   "permissions": [
@@ -11,12 +11,31 @@
     "storage"
   ],
   "host_permissions": [
-    "https://www.youtube.com/*"
+    "https://www.youtube.com/*",
+    "https://m.youtube.com/*",
+    "https://music.youtube.com/*",
+    "https://youtu.be/*"
   ],
   "content_scripts": [
     {
       "matches": [
-        "https://www.youtube.com/watch*"
+        "https://www.youtube.com/*",
+        "https://m.youtube.com/*",
+        "https://music.youtube.com/*",
+        "https://youtu.be/*"
+      ],
+      "js": [
+        "player-probe.js"
+      ],
+      "world": "MAIN",
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://www.youtube.com/*",
+        "https://m.youtube.com/*",
+        "https://music.youtube.com/*",
+        "https://youtu.be/*"
       ],
       "js": [
         "shared/clip-time.js",
@@ -30,7 +49,13 @@
   },
   "action": {
     "default_popup": "popup.html",
-    "default_title": "__MSG_extName__"
+    "default_title": "__MSG_extName__",
+    "default_icon": {
+      "16": "icon16.png",
+      "32": "icon32.png",
+      "48": "icon48.png",
+      "128": "icon128.png"
+    }
   },
   "options_ui": {
     "page": "options.html",
@@ -41,6 +66,9 @@
     "16": "icon16.png",
     "32": "icon32.png",
     "48": "icon48.png",
-    "128": "icon128.png"
+    "64": "icon64.png",
+    "128": "icon128.png",
+    "256": "icon256.png",
+    "512": "icon512.png"
   }
 }
