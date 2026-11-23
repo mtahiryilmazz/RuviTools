@@ -7,7 +7,7 @@
 
 ## 1. Rakip Analizi ve 4'lü Görsel Kıyaslama Panosu
 
-![RuviTools vs yt-dlp+FFmpeg vs MisterDownloadManager vs IDM/4KVD](charts/ruvitools_rakip_format_matrisi.svg)
+![RuviTools vs yt-dlp+FFmpeg vs IDM vs 4K Video Downloader+](charts/ruvitools_rakip_format_matrisi.svg)
 
 ````carousel
 ![ruvid vs yt-dlp İndirme ve Çözümleme Kıyaslaması](charts/ruvid_vs_ytdlp_karsilastirma.svg)
@@ -70,21 +70,21 @@
 
 ## 4. Rakiplerle Kapsamlı Özellik ve Performans Kıyaslaması
 
-### 4.1. `RuviTools` vs `yt-dlp + FFmpeg` vs `MisterDownloadManager` vs `IDM` vs `4K Video Downloader`
+### 4.1. `RuviTools` vs `yt-dlp + FFmpeg` vs `IDM` vs `4K Video Downloader+`
 
-| Özellik / Kriter | **RuviTools (`ruvid` + `ruvic` + `RuviTube`)** | **`yt-dlp` + `FFmpeg` + `Deno`** | **`MisterDownloadManager` (GitHub)** | **Internet Download Manager (IDM)** | **4K Video Downloader+** |
-| :--- | :--- | :--- | :--- | :--- | :--- |
-| **Çalışma Zamanı & Dil** | **%100 Saf Rust** (Sıfır harici ikili) | Python + C/C++ (`ffmpeg`) + JS (`deno`) | Yalnızca Tarayıcı JS (MV3) | Kapalı Kaynak C++ (Windows) | Kapalı Kaynak C++/Qt + Gömülü FFmpeg |
-| **Toplam Kurulum Boyutu** | **`19,5 MB`** (`ruvid` + `ruvic` + `NativeHost`) | `~255 MB` (`yt-dlp` + `ffmpeg` + `deno`) | `~1 MB` (Yerel motor yok) | `~35 MB` | `~145 MB` |
-| **Soğuk Başlatma Süresi** | **`13,65 ms`** | `680,0 ms` (**49,8× daha yavaş**) | Tarayıcı içi | `~180 ms` | `~1.400 ms` |
-| **Tepe RAM Kullanımı** | **`3,23 MB – 3,98 MB`** (Sabit 256 KB tampon) | `64,8 MB` (**16,3× daha fazla**) | Tarayıcı sekme belleği (`>150 MB`) | `~45 MB` | `~280 MB` |
-| **1080p / 4K / 8K Video + Ses Birleştirme** | **Defragmented Faststart MP4 (`13,5 ms`) & WebM** | Harici `ffmpeg.exe` alt süreci (`142 ms`) | **YOK** (1080p+ videolar **sessiz** iner) | Kendi fMP4 birleştiricisi (VLC'de sık ses/senkron hatası) | Gömülü FFmpeg ile birleştirir |
-| **VLC & WMP Ses ve A/V Senkronizasyonu** | **%100 Tam Örnek Tablolu (`stts`/`ctts`/`stss`/`stsz`/`stco`), `< 11 ms` Senkron** | `-c copy` kesitlerde negatif PTS / `elst` kayması | 1080p+ ses yok | Parçalı DASH akışlarda sık sık sessiz çıktı | Tam videoda iyi, kesit kırpma yok |
-| **Gerçek MP3 (`320k`/`VBR`) & WAV Dönüştürme** | **Yerleşik Saf Rust (`symphonia` + `rusty_mp3`)** | Harici `ffmpeg -b:a 320k` gerektirir | **YOK** (Sadece ham `.weba`/`.m4a`) | **YOK** (Ses dönüştürme yapamaz) | Var (Ücretsiz sürümde günlük limitli) |
-| **Otomatik Kapak Resmi & Albüm Meta Verisi** | **Otomatik ID3v2.3 (`APIC`) & MP4 (`udta/ilst/covr`)** | Manuel `--embed-thumbnail --add-metadata` | **YOK** | **YOK** | Kısmi (Akıllı `Sanatçı - Şarkı` ayrıştırma yok) |
-| **YouTube Bölüm (`Chapter`) & Kesit İndirme** | **Tek Tıkla 22 Bölüm Listesi + Özel Kesit (`MP4` & `MP3`)** | CLI `--download-sections` (Arayüz yok) | **YOK** | **YOK** | **YOK** (Tam videoyu indirmeden kesit alamaz) |
-| **YouTube Arayüzü Entegrasyonu** | **Tek Kırmızı-Turuncu Buton + 4 Minimal İkon Sekmesi (`Liste`, `Video`, `Ses`, `Makas`)** | Yok (Komut satırı) | Kalabalık metin sekmeleri, bölüm/MP3 yok | Video üstü yüzen panel (Tek kalite listesi, MP3/kesit yok) | Harici masaüstü penceresine URL kopyala-yapıştır |
-| **HTTP 403 & Çoklu-WAN Otomatik Failover** | **Otomatik (`< 150 ms` WAN geçişi + `svpuc=1` koruması)** | Yok (Manuel `--source-address` gerekir) | Yok (Tarayıcı ağ yığınına bağımlı) | `c=IOS` / `svpuc=1` akışlarında çoklu bağlantı `HTTP 403` hatası verir | Tek ağ arayüzü |
+| Özellik / Kriter | **RuviTools (`ruvid` + `ruvic` + `RuviTube`)** | **`yt-dlp` + `FFmpeg` + `Deno`** | **Internet Download Manager (IDM)** | **4K Video Downloader+** |
+| :--- | :--- | :--- | :--- | :--- |
+| **Çalışma Zamanı & Dil** | **%100 Saf Rust** (Sıfır harici ikili) | Python + C/C++ (`ffmpeg`) + JS (`deno`) | Kapalı Kaynak C++ (Windows) | Kapalı Kaynak C++/Qt + Gömülü FFmpeg |
+| **Toplam Kurulum Boyutu** | **`19,5 MB`** (`ruvid` + `ruvic` + `NativeHost`) | `~255 MB` (`yt-dlp` + `ffmpeg` + `deno`) | `~35 MB` | `~145 MB` |
+| **Soğuk Başlatma Süresi** | **`13,65 ms`** | `680,0 ms` (**49,8× daha yavaş**) | `~180 ms` | `~1.400 ms` |
+| **Tepe RAM Kullanımı** | **`3,23 MB – 3,98 MB`** (Sabit 256 KB tampon) | `64,8 MB` (**16,3× daha fazla**) | `~45 MB` | `~280 MB` |
+| **1080p / 4K / 8K Video + Ses Birleştirme** | **Defragmented Faststart MP4 (`13,5 ms`) & WebM** | Harici `ffmpeg.exe` alt süreci (`142 ms`) | Kendi fMP4 birleştiricisi (VLC'de sık ses/senkron hatası) | Gömülü FFmpeg ile birleştirir |
+| **VLC & WMP Ses ve A/V Senkronizasyonu** | **%100 Tam Örnek Tablolu (`stts`/`ctts`/`stss`/`stsz`/`stco`), `< 11 ms` Senkron** | `-c copy` kesitlerde negatif PTS / `elst` kayması | Parçalı DASH akışlarda sık sık sessiz çıktı | Tam videoda iyi, kesit kırpma yok |
+| **Gerçek MP3 (`320k`/`VBR`) & WAV Dönüştürme** | **Yerleşik Saf Rust (`symphonia` + `rusty_mp3`)** | Harici `ffmpeg -b:a 320k` gerektirir | **YOK** (Ses dönüştürme yapamaz) | Var (Ücretsiz sürümde günlük limitli) |
+| **Otomatik Kapak Resmi & Albüm Meta Verisi** | **Otomatik ID3v2.3 (`APIC`) & MP4 (`udta/ilst/covr`)** | Manuel `--embed-thumbnail --add-metadata` | **YOK** | Kısmi (Akıllı `Sanatçı - Şarkı` ayrıştırma yok) |
+| **YouTube Bölüm (`Chapter`) & Kesit İndirme** | **Tek Tıkla 22 Bölüm Listesi + Özel Kesit (`MP4` & `MP3`)** | CLI `--download-sections` (Arayüz yok) | **YOK** | **YOK** (Tam videoyu indirmeden kesit alamaz) |
+| **YouTube Arayüzü Entegrasyonu** | **Tek Kırmızı-Turuncu Buton + 4 Minimal İkon Sekmesi (`Liste`, `Video`, `Ses`, `Makas`)** | Yok (Komut satırı) | Video üstü yüzen panel (Tek kalite listesi, MP3/kesit yok) | Harici masaüstü penceresine URL kopyala-yapıştır |
+| **HTTP 403 & Çoklu-WAN Otomatik Failover** | **Otomatik (`< 150 ms` WAN geçişi + `svpuc=1` koruması)** | Yok (Manuel `--source-address` gerekir) | `c=IOS` / `svpuc=1` akışlarında çoklu bağlantı `HTTP 403` hatası verir | Tek ağ arayüzü |
 
 ---
 

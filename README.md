@@ -78,12 +78,12 @@ curl -fsSL https://mtahiryilmazz.github.io/ruvi.cmd -o "%TEMP%\ruvi.cmd" && "%TE
 
 ## Kıyaslamalı Rakip Analizi ve Performans Grafikleri
 
-RuviTools'un `yt-dlp`, `FFmpeg`, `MisterDownloadManager`, `IDM` ve `4K Video Downloader` ile format, mimari, hız ve ses/video kalitesi açısından tüm teknik kıyaslamaları aşağıdaki grafiklerde ve tam raporda yer almaktadır:
+RuviTools'un `yt-dlp`, `FFmpeg`, `IDM` ve `4K Video Downloader+` ile format, mimari, hız ve ses/video kalitesi açısından tüm teknik kıyaslamaları aşağıdaki grafiklerde ve tam raporda yer almaktadır:
 
 - 📊 **[Tam Kapsamlı Rakip Analizi ve Format Matrisi Raporu](docs/karsilastirma-raporu.md)**
 
 <p align="center">
-  <img src="docs/charts/ruvitools_rakip_format_matrisi.svg" alt="RuviTools vs yt-dlp+FFmpeg vs MisterDownloadManager vs IDM/4KVD" width="100%" />
+  <img src="docs/charts/ruvitools_rakip_format_matrisi.svg" alt="RuviTools vs yt-dlp+FFmpeg vs IDM vs 4K Video Downloader+" width="100%" />
 </p>
 <p align="center">
   <img src="docs/charts/ruvid_vs_ytdlp_karsilastirma.svg" alt="ruvid vs yt-dlp İndirme ve Çözümleme Kıyaslaması" width="100%" />
