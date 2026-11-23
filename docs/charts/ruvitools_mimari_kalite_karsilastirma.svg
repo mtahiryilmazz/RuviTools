@@ -1,0 +1,187 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 868" width="1280" height="868">
+  <defs>
+    <style>
+      .bg { fill: #ffffff; }
+      .title { font: 800 30px "Segoe UI", Inter, Roboto, Arial, sans-serif; fill: #0f172a; }
+      .subtitle { font: 500 14px "Segoe UI", Inter, Roboto, Arial, sans-serif; fill: #64748b; }
+      .hdr-box-gray { fill: #f1f5f9; rx: 10px; }
+      .hdr-box-blue { fill: #eff6ff; rx: 10px; }
+      .hdr-box-green { fill: #ecfdf5; rx: 10px; }
+      .hdr-txt-gray { font: 700 13px "Segoe UI", Inter, Arial, sans-serif; fill: #334155; letter-spacing: 0.05em; }
+      .hdr-txt-blue { font: 700 13px "Segoe UI", Inter, Arial, sans-serif; fill: #1e3a8a; letter-spacing: 0.05em; }
+      .hdr-txt-green { font: 700 13px "Segoe UI", Inter, Arial, sans-serif; fill: #065f46; letter-spacing: 0.05em; }
+      .cell-gray { fill: #f8fafc; rx: 12px; }
+      .cell-blue { fill: #f0f7ff; rx: 12px; }
+      .cell-green { fill: #eefdf4; rx: 12px; }
+      .metric-title { font: 700 15.5px "Segoe UI", Inter, Arial, sans-serif; fill: #0f172a; }
+      .metric-sub { font: 500 11.5px "Segoe UI", Inter, Arial, sans-serif; fill: #64748b; }
+      .val-blue { font: 800 21px "Segoe UI", Inter, Arial, sans-serif; fill: #0f172a; }
+      .val-green { font: 800 21px "Segoe UI", Inter, Arial, sans-serif; fill: #15803d; }
+      .diff-main { font: 800 20px "Segoe UI", Inter, Arial, sans-serif; fill: #15803d; text-anchor: middle; }
+      .diff-sub1 { font: 600 11.5px "Segoe UI", Inter, Arial, sans-serif; fill: #475569; text-anchor: middle; }
+      .diff-sub2 { font: 400 10.5px "Segoe UI", Inter, Arial, sans-serif; fill: #94a3b8; text-anchor: middle; }
+      .track-blue { fill: #dbeafe; rx: 4.5px; }
+      .track-green { fill: #d1fae5; rx: 4.5px; }
+      .bar-blue { fill: #2563eb; rx: 4.5px; }
+      .bar-green { fill: #16a34a; rx: 4.5px; }
+    </style>
+  </defs>
+
+  <rect width="1280" height="868" class="bg" rx="18"/>
+
+  <!-- Header -->
+  <rect x="44" y="34" width="6" height="36" rx="3" fill="#16a34a"/>
+  <text x="62" y="62" class="title">RuviTube v2.1 Meta Veri, Kalite ve Eklenti Deneyimi Kıyaslaması</text>
+  <text x="62" y="86" class="subtitle">Windows Gezgini albüm etiketleri, kapak resmi gömme, bölümlü indirme, HDR/360° VR koruma ve tedarik zinciri güvenliği</text>
+  <line x1="44" y1="102" x2="1236" y2="102" stroke="#e2e8f0" stroke-width="1.5"/>
+
+  <!-- Column Headers -->
+  <rect x="44" y="118" width="256" height="44" class="hdr-box-gray"/>
+  <text x="64" y="145" class="hdr-txt-gray">ÖZELLİK / KALİTE METRİĞİ</text>
+
+  <rect x="316" y="118" width="330" height="44" class="hdr-box-blue"/>
+  <rect x="330" y="130" width="3.5" height="20" rx="1.75" fill="#2563eb"/>
+  <text x="344" y="145" class="hdr-txt-blue">ÖNCEKİ DURUM / STANDART ARAÇLAR</text>
+
+  <rect x="662" y="118" width="330" height="44" class="hdr-box-green"/>
+  <rect x="676" y="130" width="3.5" height="20" rx="1.75" fill="#16a34a"/>
+  <text x="690" y="145" class="hdr-txt-green">YENİ RUVITUBE v2.1 (ruvid + ruvic)</text>
+
+  <rect x="1008" y="118" width="228" height="44" class="hdr-box-gray"/>
+  <text x="1122" y="145" class="hdr-txt-gray" text-anchor="middle">KAZANIM / SONUÇ</text>
+
+  <!-- Row 1: Album & Artist Metadata -->
+  <g transform="translate(0, 176)">
+    <rect x="44" y="0" width="256" height="84" class="cell-gray"/>
+    <text x="64" y="36" class="metric-title">Albüm, Sanatçı &amp; Yıl Bilgileri</text>
+    <text x="64" y="56" class="metric-sub">Windows Explorer &amp; müzik çalar alanları</text>
+
+    <rect x="316" y="0" width="330" height="84" class="cell-blue"/>
+    <text x="338" y="38" class="val-blue">Boş (0 / 11 Etiket Alanı)</text>
+    <rect x="338" y="54" width="286" height="9" class="track-blue"/>
+    <rect x="338" y="54" width="16" height="9" class="bar-blue"/>
+
+    <rect x="662" y="0" width="330" height="84" class="cell-green"/>
+    <text x="684" y="38" class="val-green">%100 Dolu (11/11 ID3v2.3 &amp; iTunes)</text>
+    <rect x="684" y="54" width="286" height="9" class="track-green"/>
+    <rect x="684" y="54" width="286" height="9" class="bar-green"/>
+
+    <rect x="1008" y="0" width="228" height="84" class="cell-gray"/>
+    <text x="1122" y="34" class="diff-main">+%100 Tam Etiket</text>
+    <text x="1122" y="53" class="diff-sub1">Başlık, Sanatçı, Albüm, Yıl, Tarz, Yorum</text>
+    <text x="1122" y="69" class="diff-sub2">Hem MP3 (UTF-16LE ID3v2.3) hem MP4/M4A (ilst)</text>
+  </g>
+
+  <!-- Row 2: Embedded Cover Art -->
+  <g transform="translate(0, 272)">
+    <rect x="44" y="0" width="256" height="84" class="cell-gray"/>
+    <text x="64" y="36" class="metric-title">Gömülü Albüm Kapağı (APIC/covr)</text>
+    <text x="64" y="56" class="metric-sub">Dosya simgesinde yüksek çözünürlüklü kapak</text>
+
+    <rect x="316" y="0" width="330" height="84" class="cell-blue"/>
+    <text x="338" y="38" class="val-blue">Yok (Varsayılan İkon)</text>
+    <rect x="338" y="54" width="286" height="9" class="track-blue"/>
+    <rect x="338" y="54" width="16" height="9" class="bar-blue"/>
+
+    <rect x="662" y="0" width="330" height="84" class="cell-green"/>
+    <text x="684" y="38" class="val-green">Otomatik Paralel Kapak Gömme</text>
+    <rect x="684" y="54" width="286" height="9" class="track-green"/>
+    <rect x="684" y="54" width="286" height="9" class="bar-green"/>
+
+    <rect x="1008" y="0" width="228" height="84" class="cell-gray"/>
+    <text x="1122" y="34" class="diff-main">0 ms Ek Gecikme</text>
+    <text x="1122" y="53" class="diff-sub1">Ses/video inerken paralel tokio göreviyle çekilir</text>
+    <text x="1122" y="69" class="diff-sub2">ID3v2.3 APIC ve MP4 udta/meta/ilst/covr</text>
+  </g>
+
+  <!-- Row 3: Chapter & Segmented Download -->
+  <g transform="translate(0, 368)">
+    <rect x="44" y="0" width="256" height="84" class="cell-gray"/>
+    <text x="64" y="36" class="metric-title">Bölümlü / Parçalı İndirme</text>
+    <text x="64" y="56" class="metric-sub">Bölüm başlıkları ve VLC oynatma uyumu</text>
+
+    <rect x="316" y="0" width="330" height="84" class="cell-blue"/>
+    <text x="338" y="38" class="val-blue">"Bölüm 9:13" · Ham Bayt Kesimi</text>
+    <rect x="338" y="54" width="286" height="9" class="track-blue"/>
+    <rect x="338" y="54" width="75" height="9" class="bar-blue"/>
+
+    <rect x="662" y="0" width="330" height="84" class="cell-green"/>
+    <text x="684" y="38" class="val-green">"11. 1100 Hz Overclock..." · Keyframe</text>
+    <rect x="684" y="54" width="286" height="9" class="track-green"/>
+    <rect x="684" y="54" width="286" height="9" class="bar-green"/>
+
+    <rect x="1008" y="0" width="228" height="84" class="cell-gray"/>
+    <text x="1122" y="34" class="diff-main">%100 VLC Uyumlu</text>
+    <text x="1122" y="53" class="diff-sub1">22 bölümün tamamı gerçek adıyla listelenir</text>
+    <text x="1122" y="69" class="diff-sub2">MP4 moof/tfdt ve WebM Cluster 00:00 hizalı</text>
+  </g>
+
+  <!-- Row 4: Unified Red-Orange YouTube UI -->
+  <g transform="translate(0, 464)">
+    <rect x="44" y="0" width="256" height="84" class="cell-gray"/>
+    <text x="64" y="36" class="metric-title">YouTube Sayfa İçi Arayüz</text>
+    <text x="64" y="56" class="metric-sub">Buton yerleşimi, tasarım ve format kapsamı</text>
+
+    <rect x="316" y="0" width="330" height="84" class="cell-blue"/>
+    <text x="338" y="38" class="val-blue">2 Ayrı Buton · Sınırlı Kalite</text>
+    <rect x="338" y="54" width="286" height="9" class="track-blue"/>
+    <rect x="338" y="54" width="120" height="9" class="bar-blue"/>
+
+    <rect x="662" y="0" width="330" height="84" class="cell-green"/>
+    <text x="684" y="38" class="val-green">Tek Kırmızı-Turuncu Buton · 8K..MP3</text>
+    <rect x="684" y="54" width="286" height="9" class="track-green"/>
+    <rect x="684" y="54" width="286" height="9" class="bar-green"/>
+
+    <rect x="1008" y="0" width="228" height="84" class="cell-gray"/>
+    <text x="1122" y="34" class="diff-main">Birleşik Tek Menü</text>
+    <text x="1122" y="53" class="diff-sub1">Özel RuviTube vektör ikonu + 8K..144p + 8 ses</text>
+    <text x="1122" y="69" class="diff-sub2">Normal ve bölümlü indirme tek açılır menüde</text>
+  </g>
+
+  <!-- Row 5: HDR10 & 360 VR Spatial Preservation -->
+  <g transform="translate(0, 560)">
+    <rect x="44" y="0" width="256" height="84" class="cell-gray"/>
+    <text x="64" y="36" class="metric-title">HDR10 &amp; 360° VR Kutu Koruma</text>
+    <text x="64" y="56" class="metric-sub">colr, mdcv, clli, sv3d, Equirectangular</text>
+
+    <rect x="316" y="0" width="330" height="84" class="cell-blue"/>
+    <text x="338" y="38" class="val-blue">Kısmi (Bayrak Gerektirir)</text>
+    <rect x="338" y="54" width="286" height="9" class="track-blue"/>
+    <rect x="338" y="54" width="160" height="9" class="bar-blue"/>
+
+    <rect x="662" y="0" width="330" height="84" class="cell-green"/>
+    <text x="684" y="38" class="val-green">%100 Kayıpsız Otomatik Koruma</text>
+    <rect x="684" y="54" width="286" height="9" class="track-green"/>
+    <rect x="684" y="54" width="286" height="9" class="bar-green"/>
+
+    <rect x="1008" y="0" width="228" height="84" class="cell-gray"/>
+    <text x="1122" y="34" class="diff-main">Birebir Atom/EBML</text>
+    <text x="1122" y="53" class="diff-sub1">BT.2020 renk uzayı ve küresel VR projeksiyonu</text>
+    <text x="1122" y="69" class="diff-sub2">25 Tier-1 + 25 Tier-2 sınır testiyle doğrulandı</text>
+  </g>
+
+  <!-- Row 6: Supply Chain & Verification Suite -->
+  <g transform="translate(0, 656)">
+    <rect x="44" y="0" width="256" height="84" class="cell-gray"/>
+    <text x="64" y="36" class="metric-title">Tedarik Zinciri &amp; Doğrulama</text>
+    <text x="64" y="56" class="metric-sub">deny.toml, Cargo.lock ve verify-all.ps1</text>
+
+    <rect x="316" y="0" width="330" height="84" class="cell-blue"/>
+    <text x="338" y="38" class="val-blue">Harici İkili + OpenSSL / C</text>
+    <rect x="338" y="54" width="286" height="9" class="track-blue"/>
+    <rect x="338" y="54" width="95" height="9" class="bar-blue"/>
+
+    <rect x="662" y="0" width="330" height="84" class="cell-green"/>
+    <text x="684" y="38" class="val-green">21/21 Kontrol PASS (Sıfır Harici)</text>
+    <rect x="684" y="54" width="286" height="9" class="track-green"/>
+    <rect x="684" y="54" width="286" height="9" class="bar-green"/>
+
+    <rect x="1008" y="0" width="228" height="84" class="cell-gray"/>
+    <text x="1122" y="34" class="diff-main">%100 Saf Rust</text>
+    <text x="1122" y="53" class="diff-sub1">Sıfır yt-dlp, sıfır ffmpeg, sıfır openssl-sys</text>
+    <text x="1122" y="69" class="diff-sub2">Yalnızca crates.io + rustls + SSRF koruması</text>
+  </g>
+
+  <!-- Footer Note -->
+  <text x="44" y="776" class="subtitle">Not: Tüm meta veri ve bölüm testleri Windows 11 Explorer (Shell.Application), VLC Media Player ve ruvic.exe probe ile doğrulanmıştır.</text>
+</svg>

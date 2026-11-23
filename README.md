@@ -76,6 +76,27 @@ curl -fsSL https://mtahiryilmazz.github.io/ruvi.cmd -o "%TEMP%\ruvi.cmd" && "%TE
 
 ---
 
+## Kıyaslamalı Rakip Analizi ve Performans Grafikleri
+
+RuviTools'un `yt-dlp`, `FFmpeg`, `MisterDownloadManager`, `IDM` ve `4K Video Downloader` ile format, mimari, hız ve ses/video kalitesi açısından tüm teknik kıyaslamaları aşağıdaki grafiklerde ve tam raporda yer almaktadır:
+
+- 📊 **[Tam Kapsamlı Rakip Analizi ve Format Matrisi Raporu](docs/karsilastirma-raporu.md)**
+
+<p align="center">
+  <img src="docs/charts/ruvitools_rakip_format_matrisi.svg" alt="RuviTools vs yt-dlp+FFmpeg vs MisterDownloadManager vs IDM/4KVD" width="100%" />
+</p>
+<p align="center">
+  <img src="docs/charts/ruvid_vs_ytdlp_karsilastirma.svg" alt="ruvid vs yt-dlp İndirme ve Çözümleme Kıyaslaması" width="100%" />
+</p>
+<p align="center">
+  <img src="docs/charts/ruvic_vs_ffmpeg_karsilastirma.svg" alt="ruvic vs FFmpeg Dönüştürme, Mux ve Kırpma Kıyaslaması" width="100%" />
+</p>
+<p align="center">
+  <img src="docs/charts/ruvitools_mimari_kalite_karsilastirma.svg" alt="RuviTools Mimari ve Kalite Kıyaslaması" width="100%" />
+</p>
+
+---
+
 ## Logo Paketi (Açık & Koyu Tema)
 
 Eklenti ve masaüstü stüdyosu içinde hem **Standart (Kırmızı-Turuncu)** hem de **Koyu (Dark)** tema logo paketleri (`16px` – `1024px` PNG, `.ico` ve vektörel `.svg`) yer almaktadır:
