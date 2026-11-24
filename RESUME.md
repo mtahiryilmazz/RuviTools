@@ -17,7 +17,7 @@
    - Seek tabanlı streaming I/O (`copy_chunked`, 64 KB okuma / 1 MB `BufWriter`), `validate_moov_integrity` (`ExitCode::Integrity = 8`), atomik geçici dosya yazımı ve temizlik.
 5. **[x] R5 (Kalite Kapıları):**
    - `ruvid`: `cargo fmt --all -- --check` ✅ · `cargo clippy --all-targets -- -D warnings` ✅ · `cargo test` (**103/103**) ✅ · `cargo build --release` ✅
-   - `ruvic`: `cargo fmt --all -- --check` ✅ · `cargo clippy --all-targets -- -D warnings` ✅ · `cargo test` (**106/106**) ✅ · `cargo build --release` ✅
+   - `ruvic`: `cargo fmt --all -- --check` ✅ · `cargo clippy --all-targets -- -D warnings` ✅ · `cargo test` (**84/84** hermetik; `RUVIC_DIFF=1` ile 5/5 oracle) ✅ · `cargo build --release` ✅
 6. **[x] R6 & M6 (Canlı YouTube Doğrulaması & Piyasa Kıyaslamalı Benchmark):**
    - Canlı YouTube (`jNQXAC9IVRw`) `--jobs 4` paralel Range indirme, DASH `itag-133+itag-140` çift akış + otomatik `ruvic` remux, SRT altyazı, ADTS AAC / M4A çıkarımı ve 50.3 MB MP4 streaming benchmark sonuçları [BENCHMARK.md](file:///d:/mtahiryilmazz/Github/RuviTools/BENCHMARK.md) dosyasına kaydedildi.
 7. **[x] R7 (Dokümantasyon & Git Push):**

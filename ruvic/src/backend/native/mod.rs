@@ -4,6 +4,7 @@ pub mod dual_mux;
 pub mod ebml;
 pub mod mp4_atoms;
 pub mod processor;
+pub mod timescale;
 
 use std::path::Path;
 

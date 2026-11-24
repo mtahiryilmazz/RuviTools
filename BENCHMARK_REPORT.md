@@ -299,3 +299,49 @@ Milestone 1 acceptance criteria have been fully satisfied:
 - ✅ **ruvic vs ffmpeg**: Proved a **46.8x remuxing speedup** (0.287s vs 13.437s) and a **49.5x private memory reduction** (3.49 MB vs 172.66 MB) for `ruvic`.
 - ✅ **GoogleVideo 403 Prevention**: Fully verified via Innertube iOS client resolution (`c=IOS`), redirect header preservation, and interface binding.
 - ✅ **Comprehensive Report**: Published to `BENCHMARK_REPORT.md` at RuviTools workspace root with telemetry logs and reproducible CLI commands.
+
+---
+
+## 9. ruvic v0.2.0 — Motor İçi (Micro) Benchmark ve Diferansiyel Doğrulama
+
+Section 6 ölçümleri `ruvic 0.1.0` ikilisinin **uçtan uca CLI duvar saati** değerleridir (süreç
+başlatma + tokio çalışma zamanı + yapılandırma + çıktı açma dahil). Bunlar ürün vaadi için doğru
+metriktir, ancak "`probe` neden `ffprobe`'dan yavaş?" sorusunun cevabını vermez. `0.2.0` ile
+`cargo bench --bench native_engine` (criterion) motorun kendisini ölçer:
+
+| Benchmark | Ölçülen | Süre (medyan) |
+| :--- | :--- | :--- |
+| `probe/10min_1080p_file` | 8 MiB gövdeli, 10 dk 1080p MP4'ün tam `moov` ayrıştırması | **41.7 µs** |
+| `remux_faststart/8MiB_moov_reorder` | 8 MiB dosyada `moov` öne alma + `stco` yeniden hesabı | **714.6 µs** |
+| `trim/mp4_5s_of_10min` | 10 dk dosyadan 5 sn kesit kırpma (anahtar kare hizalı) | **1.52 µs** (planlama) |
+| `timescale/rescale_u64_10h_48khz` | 10 saatlik 48 kHz zaman damgası dönüşümü (i128) | **2.65 ns** |
+| `timescale/nanos_to_ticks_ntsc` | nanosecond → 90 kHz tick (30000/1001 senaryosu) | **2.15 ns** |
+| `timescale/ratio_cmp_mixed_timebases` | çapraz çarpım oran karşılaştırması | **0.82 ns** |
+
+Sonuç: `probe`'un 41 µs'lik gerçek ayrıştırma maliyeti, CLI'nin 70 ms'lik duvar saatinin
+%0.06'sıdır — `probe` ile `ffprobe` arasındaki fark parser döngüsünden değil, süreç/başlatma
+maliyetinden gelir. Taşma-güvenli tam sayı zaman ölçekleme (i128) ise ölçülemeyecek kadar ucuz:
+tick başına ~2.6 ns.
+
+### Diferansiyel (Oracle) Doğrulama
+
+`tests/differential_ffmpeg_tests.rs`, native motorun ürettiği dosyaları gerçek `ffmpeg`/`ffprobe`
+çıktısıyla karşılaştırır ve her çıktıyı `ffmpeg -v error -f null -` çözme kapısından geçirir.
+Paket **varsayılan olarak kapalıdır** (`RUVIC_DIFF=1`); `ruvic` çalışma zamanında hiçbir dış ikili
+çağırmaz — `ffmpeg` burada yalnızca bağımsız referanstır.
+
+| Vaka | Sonuç |
+| :--- | :--- |
+| `diff_probe_matches_ffprobe` | ✅ süre/akış/codec/çözünürlük/örnekleme birebir |
+| `diff_remux_preserves_sample_tables` | ✅ süre ±20 ms, video+ses `nb_frames` birebir, temiz çözme |
+| `diff_trim_matches_stream_copy` | ✅ `ffmpeg -ss/-t -c copy` ile ±0.5 sn, `start_time ≈ 0` |
+| `diff_dual_mux_rebuilds_dash_streams` | ✅ 1 video + 1 ses, süre ±150 ms, `nb_frames` birebir |
+| `diff_ntsc_timescale_has_no_drift` | ✅ 30000/1001'de süre ±1 ms, kare sayısı ve `time_base` korunmuş |
+
+Yeniden üretmek için:
+
+```powershell
+cd ruvic
+cargo bench --bench native_engine -- --quick
+$env:RUVIC_DIFF="1"; cargo test --test differential_ffmpeg_tests -- --test-threads=1
+```

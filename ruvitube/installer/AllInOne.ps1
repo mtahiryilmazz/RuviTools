@@ -1,4 +1,4 @@
-﻿# RuviTube — All-in-One PowerShell Kurulumu (irm | iex uyumlu)
+# RuviTube — All-in-One PowerShell Kurulumu (irm | iex uyumlu)
 # UTF-8 BOM
 
 $ErrorActionPreference = 'Stop'

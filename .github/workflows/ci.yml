@@ -77,6 +77,33 @@ jobs:
           manifest-path: ${{ matrix.crate }}/Cargo.toml
           arguments: --all-features --config deny.toml
 
+  differential-ffmpeg:
+    name: Differential vs real ffmpeg (ruvic)
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install ffmpeg / ffprobe (test oracle only)
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
+
+      - name: Cache Cargo dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: ruvic
+
+      - name: Run differential oracle suite
+        env:
+          RUVIC_DIFF: "1"
+        run: cargo test --manifest-path ruvic/Cargo.toml --test differential_ffmpeg_tests -- --test-threads=1
+
+      - name: Compile criterion benchmarks
+        run: cargo bench --manifest-path ruvic/Cargo.toml --no-run
+
   scripts-and-extension:
     name: PowerShell & Extension Verification
     runs-on: windows-latest

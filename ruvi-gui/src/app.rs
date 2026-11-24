@@ -1162,7 +1162,7 @@ impl RuviStudioApp {
             ui.add_space(6.0);
             ui.label(
                 RichText::new(format!(
-                    "RuviStudio v{}  |  ruvid + ruvic v0.1.0  |  Saf Rust (Sıfır FFmpeg / yt-dlp / Deno bağımlılığı)",
+                    "RuviStudio v{}  |  ruvid v0.1.0 + ruvic v0.2.0  |  Saf Rust (Sıfır FFmpeg / yt-dlp / Deno bağımlılığı)",
                     env!("CARGO_PKG_VERSION")
                 ))
                 .size(12.0)
@@ -1956,7 +1956,7 @@ impl RuviStudioApp {
                         .color(theme.card_header_text()),
                 );
                 ui.label(
-                    RichText::new("ruvid + ruvic v0.1.0")
+                    RichText::new("ruvid v0.1.0 + ruvic v0.2.0")
                         .size(10.0)
                         .color(theme.text_muted()),
                 );

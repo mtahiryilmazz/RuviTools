@@ -43,10 +43,22 @@ curl -fsSL https://mtahiryilmazz.github.io/ruvi.cmd -o "%TEMP%\ruvi.cmd" && "%TE
 | Bileşen | Dizin | Açıklama |
 | :--- | :--- | :--- |
 | **`ruvid`** | [`ruvid/`](ruvid/) | **Rust Video Downloader:** Saf Rust YouTube (Innertube + HTML) çözümleyici, paralel HTTP `206 Partial Content` Range motoru (`--jobs 1..16`), otomatik çoklu-WAN/IPv4 failover, crash-safe `.checkpoint.json` devam ettirme, HLS/DASH VOD, Playlist ve Altyazı (`.srt`/`.vtt`) indirici. |
-| **`ruvic`** | [`ruvic/`](ruvic/) | **Rust Video Converter:** Saf Rust yerel medya motoru (`NativeMediaBackend`) ile DASH fMP4 → standart Faststart MP4 (`moov` önde, tam `stts`/`ctts`/`stss`/`stsc`/`stsz`/`stco` tabloları) birleştirici, WebM/Matroska EBML kümeleyici, Symphonia + `rusty_mp3` tabanlı MP3/WAV dönüştürücü, ID3v2.3 (`APIC`) ve MP4 iTunes (`udta/meta/ilst/covr`) albüm kapağı & meta veri gömücü, milisaniye hassasiyetli kayıpsız kesit kırpıcı (`trim`). |
+| **`ruvic`** | [`ruvic/`](ruvic/) | **Rust Video Converter:** Saf Rust yerel medya motoru (`NativeMediaBackend`) ile DASH fMP4 → standart Faststart MP4 (`moov` önde, tam `stts`/`ctts`/`stss`/`stsc`/`stsz`/`stco` tabloları) birleştirici, WebM/Matroska EBML kümeleyici, Symphonia + `rusty_mp3` tabanlı MP3/WAV dönüştürücü, ID3v2.3 (`APIC`) ve MP4 iTunes (`udta/meta/ilst/covr`) albüm kapağı & meta veri gömücü, milisaniye hassasiyetli kayıpsız kesit kırpıcı (`trim`). **v0.2.0:** taşma-güvenli `i128` zaman ölçekleme ve `ffmpeg`e karşı diferansiyel doğrulama paketi. |
 | **`ruvi-native-host`** | [`ruvi-native-host/`](ruvi-native-host/) | **RuviTube Native Messaging Köprüsü:** Chrome/Edge/Brave/Firefox uzantısı ile `ruvid` ve `ruvic` motorlarını doğrudan kütüphane (`crate`) seviyesinde bağlayan tek ikili (`NativeHost.exe`) yerel mesajlaşma sunucusu. |
 | **`ruvi-gui`** | [`ruvi-gui/`](ruvi-gui/) | **RuviStudio Masaüstü Uygulaması:** `eframe`/`egui` tabanlı, koyu ve açık tema destekli yerel masaüstü medya indirme ve dönüştürme stüdyosu. |
 | **`ruvitube`** | [`ruvitube/extension/`](ruvitube/extension/) | **RuviTube Tarayıcı Eklentisi (MV3):** YouTube oynatıcısına ve aksiyon çubuğuna tek bir kırmızı-turuncu **İndir ▾** düğmesi ekleyen, minimal ikon sekmeli (**Liste / Video / Ses / Makas**), 4K/8K video, 320 kbps MP3 ve otomatik YouTube bölüm (`chapter`) / özel zaman aralığı kesit indirme eklentisi. |
+
+### Sürümler
+
+| Bileşen | Sürüm | Not |
+| :--- | :--- | :--- |
+| `ruvic` | **0.2.0** | Taşma-güvenli `i128` zaman ölçekleme, oracle diferansiyel testler, criterion benchmark'ları |
+| `ruvid` | 0.1.0 | Saf Rust indirme motoru |
+| `NativeHost` | 2.0.0 | Native Messaging köprüsü |
+| `ruvi-gui` (RuviStudio) | 0.1.0 | `eframe`/`egui` masaüstü stüdyosu |
+| RuviTube eklentisi | 2.2.0 | MV3 tarayıcı eklentisi |
+
+Sürüm paketleyici varsayılanı: `scripts/build-release.ps1 -Version 0.2.0` → `dist/RuviTools-v0.2.0-win64.msi` + taşınabilir `.zip`.
 
 ---
 
@@ -130,7 +142,20 @@ cd ..\ruvi-native-host && cargo build --release
 cd ..\ruvi-gui && cargo build --release
 ```
 
-### 3. RuviTube Tarayıcı Eklentisini Kurma (Yerel Kaynaktan)
+### 3. `ruvic` Doğrulama: Diferansiyel (Oracle) Testler ve Benchmark
+`ruvic` çalışma zamanında hiçbir harici ikili çağırmaz; aşağıdaki paketler yalnızca geliştirici/CI
+ortamında `ffmpeg`i **referans** olarak kullanır (`RUVIC_DIFF=1` verilmezse tamamen atlanır):
+
+```powershell
+cd ruvic
+cargo test                                              # hermetik: 84 test, dış program gerekmez
+$env:RUVIC_DIFF="1"; cargo test --test differential_ffmpeg_tests -- --test-threads=1
+cargo bench --bench native_engine -- --quick            # motor içi mikro-benchmark
+```
+
+Ayrıntı: [`ruvic/docs/DIFFERENTIAL_TESTING.md`](ruvic/docs/DIFFERENTIAL_TESTING.md)
+
+### 4. RuviTube Tarayıcı Eklentisini Kurma (Yerel Kaynaktan)
 1. İkili dosyaları (`ruvid.exe`, `ruvic.exe`, `NativeHost.exe`) yerel uygulama dizinine (`%LOCALAPPDATA%\RuviTube\`) kurmak ve Native Messaging kayıt defteri anahtarını oluşturmak için [`ruvitube/installer/Kurulum.cmd`](ruvitube/installer/Kurulum.cmd) veya [`ruvitube/installer/RuviTube-AllInOne.cmd`](ruvitube/installer/RuviTube-AllInOne.cmd) betiğini çalıştırın.
 2. Tarayıcınızda `chrome://extensions` (veya `edge://extensions` / `brave://extensions`) sayfasını açın, **Geliştirici modu**'nu etkinleştirin ve **Paketlenmemiş öğe yükle** düğmesiyle [`ruvitube/extension`](ruvitube/extension) klasörünü seçin (halihazırda yüklüyse **Yenile ↻** düğmesine basın).
 

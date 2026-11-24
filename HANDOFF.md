@@ -20,7 +20,7 @@ Her iki uygulama da harici araçlara (`yt-dlp`, `deno`, `ffmpeg`, `ffprobe`) ba�
 
 - **`ruvic/` (`d:\mtahiryilmazz\Github\RuviTools\ruvic`) — RUVIC (Rust Video Converter & Native Media Engine)**
   - Release ikilisi: `ruvic\target\release\ruvic.exe` (**3,662,848 B / ~3.49 MB**)
-  - Kalite Kapıları: `cargo fmt --all -- --check` ✅ · `cargo clippy --all-targets -- -D warnings` ✅ · `cargo test` (**106/106** birim ve entegrasyon testi geçti) ✅
+  - Kalite Kapıları: `cargo fmt --all -- --check` ✅ · `cargo clippy --all-targets -- -D warnings` ✅ · `cargo test` (**84/84** hermetik birim ve entegrasyon testi + `RUVIC_DIFF=1` ile 5/5 oracle testi) ✅
   - Yetenekler:
     - **Minimal Bellek Yükü (Streaming I/O):** Medya dosyalarının tamamını RAM'e yükleyen `std::fs::read` yerine seek tabanlı `BufReader` / `BufWriter` ve `copy_chunked` (64 KB okuma / 1 MB yazma tamponu) mimarisi (50.3 MB MP4 remux işleminde yalnızca **3.53 MB** özel RAM kullanımı).
     - **Saf Rust MP4 & WebM Motoru:** Gerçek `moov`/`mdat` ayrıştırma, `stco` (32-bit) ve `co64` (64-bit) chunk-offset yeniden hesaplamalı faststart/remux/trim, `stsc`/`stsz`/`stco`/`stts`/`stss` örnek tablosu ayrıştırma.

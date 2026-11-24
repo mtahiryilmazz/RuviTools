@@ -1,17 +1,59 @@
 # RUVIC Durum Raporu (`docs/STATUS.md`)
 
-- **Durum:** %100 Saf Rust native medya motoru tamamlandı, canlı medya ve 50 MB streaming benchmark testlerinden geçti (`target/release/ruvic.exe`, **3,911,680 B / ~3.73 MB**).
-- **Bağımsız Dizin:** `d:\mtahiryilmazz\Github\RuviTools\ruvic`
-- **Uygulanan Özellikler:**
-  - CLI (`probe`, `convert`, `remux`, `audio`, `trim`, `thumbnail`, `batch`, `preset`, `config`, `doctor`, `--manifest`, `--video`, `--audio`, `--json`, isteğe bağlı `--ffmpeg`/`--ffprobe`)
-  - **Minimal Bellek Yükü (Streaming I/O):** `std::fs::read` ile tüm dosyayı belleğe almak yerine seek tabanlı `BufReader`/`BufWriter` ve `copy_chunked` (64 KB / 1 MB) ile sınırlı bellekli akış işleme (50.3 MB MP4 remux işleminde yalnızca **3.53 MB** özel RAM)
-  - **Harici `ffmpeg`/`ffprobe` gerektirmeyen %100 Saf Rust `NativeMediaBackend` motoru:**
-    - ISO-BMFF (`MP4`/`MOV`/`M4A`) `moov`/`mdat` ayrıştırma, `stco` (32-bit) ve `co64` (64-bit) chunk-offset yeniden hesaplamalı faststart remux ve trim
-    - Tam örnek tablosu ayrıştırma (`stsc`, `stsz`, `stco`, `co64`, `stts`, `stss`)
-    - Gerçek ses demuxing: örnek tablolarından ADTS AAC (`.aac`) çerçeve çıkarımı ve bağımsız M4A (`.m4a`) üretimi
-    - Çift girdili DASH remuxing (`multiplex_mp4_dual_input` ve `multiplex_ebml_dual_input`): ayrık video ve ses akışlarını tek MP4 veya WebM konteynerinde birleştirme (tekil veya dual-stream JSON handoff manifest desteğiyle)
-    - Küresel 360/VR (`sv3d`, `proj`, EBML `0x7670`) ve HDR renk (`colr`, `mdcv`, `clli`, EBML `0x55B0`) meta verilerini remux ve trim sırasında koruma
-  - **Sistem Bütünlüğü (`ExitCode::Integrity = 8`):** `validate_moov_integrity` ile yazım öncesi `stco`/`co64` tablo uzunluğu, version/flags=0, EOF aşımı ve alt kutu sınır denetimi; atomik `.ruvic-tmp` yazımı ve hata anında temizlik
-- **Testler:** `cargo test` — **106/106** birim ve entegrasyon testi geçti (`tier1_feature_coverage_tests`: 25, `tier2_boundary_corner_tests`: 25, `native_engine_tests`: 8, `security_architecture_tests`: 6, `cli_tests`: 3, `operations_tests`: 2, `probe_tests`: 2, birim testleri: 35).
-- **Kalite:** `cargo fmt --all -- --check` ve `cargo clippy --all-targets -- -D warnings` sıfır hata/uyarı ile geçti.
-- **Canlı Test & Benchmark:** Gerçek YouTube MP4 akışları ve 50.3 MB MP4 üzerinde `probe` (17.08 ms), `remux` (42.36 ms, ~1,187 MB/sn), `trim` (23.78 ms) ve `audio` ADTS AAC / M4A çıkarımı (25.38 ms) doğrulandı.
+- **Sürüm:** `0.2.0` (bkz. `ruvic/Cargo.toml`)
+- **Durum:** %100 Saf Rust native medya motoru; harici `ffmpeg`/`ffprobe`/`yt-dlp` bağımlılığı yok.
+  Release ikili: `target/release/ruvic.exe`, **5,716,480 B / ~5.45 MB** (strip + fat LTO).
+- **Depo:** <https://github.com/mtahiryilmazz/RuviTools> — `ruvic/` · **Lisans:** MIT
+- **Rust:** `edition = "2024"`, `rust-version = "1.85"` (bu makinede derleme: rustc 1.100.0)
+
+## 0.2.0 ile gelenler
+
+| Değişiklik | Nerede | Etkisi |
+| :--- | :--- | :--- |
+| Taşma-güvenli tam sayı zaman ölçekleme | `src/backend/native/timescale.rs` (yeni) | `mvhd`/`mdhd`/`stts`/`elst`/EBML dönüşümleri `f64` yerine `u128`/`i128`; 10+ saatlik dosyalarda ve `30000/1001` tabanında kayma yok |
+| `dual_mux.rs` f64 temizliği | `dual_mux.rs` | `tkhd`/`mdhd` süreleri, DASH parça sıralaması, kesit sınırları ve WebM tick hesabı tam sayı; `stts`/`trun` toplamı `u32` taşması yapamaz |
+| Diferansiyel "oracle" test paketi | `tests/differential_ffmpeg_tests.rs` (yeni) | 5 vaka, gerçek `ffmpeg`/`ffprobe` referansı; **varsayılan kapalı** (`RUVIC_DIFF=1`), üretim ikilisine girmez |
+| Criterion mikro-benchmark'ları | `benches/native_engine.rs` (yeni) | `probe` / `remux` / `trim` / `timescale` motor içi ölçüm |
+| CI: `differential-ffmpeg` işi | `.github/workflows/ci.yml` | Ubuntu'da ffmpeg kurup oracle paketini çalıştırır, benchmark hedeflerini derler |
+| Paket meta verisi | `Cargo.toml` | `repository`, `homepage`, `documentation`, `keywords`, `categories` |
+
+## Uygulanan Özellikler
+
+- **CLI:** `probe`, `convert`, `remux`, `audio`, `trim`, `thumbnail`, `batch`, `preset`, `config`, `doctor`,
+  `--manifest`, `--video`, `--audio`, `--json`; isteğe bağlı `--ffmpeg`/`--ffprobe` (varsayılan kapalı).
+- **ISO-BMFF (`MP4`/`MOV`/`M4A`/`fMP4`):** `moov`/`mdat` ayrıştırma, `stco` (32-bit) ve `co64` (64-bit)
+  offset yeniden hesaplamalı faststart remux, tam örnek tablosu (`stsc`, `stsz`, `stco`, `co64`, `stts`, `stss`).
+- **DASH defragmenter:** `multiplex_mp4_dual_input` / `try_mux_fmp4` — ayrı video ve ses `moof+mdat`
+  akışlarını tek standart Faststart MP4'te birleştirir (tekil/çift akış JSON handoff manifest desteği).
+- **WebM/Matroska (EBML):** küme birleştirme, `TimestampScale` tabanlı zaman hesabı, kesit kırpma.
+- **Ses:** ADTS AAC ve M4A demux, Symphonia + `rusty_mp3` (320k/VBR MP3) ve 16-bit WAV kodlama,
+  ID3v2.3 (`APIC`) ve iTunes (`covr`) kapak/meta veri gömme.
+- **Meta veri koruma:** HDR10 (`colr`, `mdcv`, `clli`), 360°/VR (`svil`, `proj`, EBML `0x7670`).
+- **Streaming I/O:** 64 KB / 1 MB `BufReader`/`BufWriter` ve `copy_chunked` (50 MB remux'ta ~3.5 MB özel RAM).
+- **Bütünlük:** `validate_moov_integrity` (yazma öncesi `stco`/`co64` uzunluğu, version/flags=0, EOF aşımı,
+  alt kutu sınırı → `ExitCode::Integrity = 8`), atomik `.ruvic-tmp` yazımı ve hata anında temizlik.
+
+## Testler
+
+| Paket | Test | Durum |
+| :--- | :--- | :--- |
+| Birim testleri (`src/`) | 11 (8'i `timescale` modülü) | ✅ |
+| `tier1_feature_coverage_tests` | 25 | ✅ |
+| `tier2_boundary_corner_tests` | 25 | ✅ |
+| `native_engine_tests` | 9 | ✅ |
+| `security_architecture_tests` | 6 | ✅ |
+| `cli_tests` | 4 | ✅ |
+| `probe_tests` | 2 | ✅ |
+| `operations_tests` | 2 | ✅ |
+| **Hermetik toplam** | **84** | ✅ (`cargo test`, dış program gerekmez) |
+| `differential_ffmpeg_tests` (oracle) | 5 | ✅ `RUVIC_DIFF=1` ile; varsayılan atlanır |
+
+- **Kalite:** `cargo fmt --all -- --check` ve `cargo clippy --all-targets -- -D warnings` sıfır hata/uyarı.
+- **Benchmark:** `cargo bench --bench native_engine` — `probe` 41.7 µs, 8 MiB remux 714.6 µs,
+  zaman ölçekleme tick başına ~2.6 ns (ayrıntı: `BENCHMARK_REPORT.md` §9).
+
+## Bağımlılık Politikası
+
+`ruvic` çalışma zamanında hiçbir dış ikili çağırmaz; `ffmpeg`/`ffprobe` yalnızca CI'daki oracle
+testlerinde referans olarak kullanılır (`docs/DIFFERENTIAL_TESTING.md`). Kullanıcı isterse
+`--ffmpeg`/`--ffprobe` ile harici arka ucu elle seçebilir; bu bir varsayılan değil, bilinçli bir tercihtir.

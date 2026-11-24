@@ -1,9 +1,9 @@
-﻿# RuviTools — Unified Windows Release Packager & WiX v7 MSI Builder
+# RuviTools — Unified Windows Release Packager & WiX v7 MSI Builder
 # UTF-8 BOM
 
 [CmdletBinding()]
 param(
-  [string]$Version = '0.1.0',
+  [string]$Version = '0.2.0',
   [switch]$WithMimalloc,
   [switch]$SkipBuild,
   [switch]$SkipMsi

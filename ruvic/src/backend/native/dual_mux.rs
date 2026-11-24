@@ -6,6 +6,7 @@
 use std::io::{Read, Seek, SeekFrom, Write};
 
 use crate::backend::native::mp4_atoms::{build_mvhd, copy_chunked, wrap_box};
+use crate::backend::native::timescale::{self, Round};
 use crate::error::RuviResult;
 
 // ----------------------------------------------------------------------------
@@ -582,6 +583,14 @@ fn build_populated_stbl(
     Some(wrap_box(b"stbl", &out))
 }
 
+/// Median duration of a defragmented track, in its own `1/timescale` clock.
+///
+/// Summed in `u64` through [`timescale::sum_sample_durations`] so a 10+ hour
+/// track never wraps the 32-bit `stts`/`trun` individual durations.
+fn media_duration_ticks(trk: &DefragTrack) -> u64 {
+    timescale::sum_sample_durations(trk.samples.iter().map(|s| s.duration))
+}
+
 fn rebuild_defrag_trak(
     trk: &DefragTrack,
     new_track_id: u32,
@@ -596,10 +605,13 @@ fn rebuild_defrag_trak(
         .iter()
         .map(|s| u64::from(s.duration.max(1)))
         .sum();
-    let movie_dur_units = ((media_dur_ticks as f64 / f64::from(trk.timescale.max(1)))
-        * f64::from(movie_timescale))
-    .round()
-    .clamp(1.0, f64::from(u32::MAX)) as u32;
+    let movie_dur_units = timescale::rescale_u64(
+        media_dur_ticks,
+        u64::from(movie_timescale.max(1)),
+        u64::from(trk.timescale.max(1)),
+        Round::Nearest,
+    )
+    .clamp(1, u64::from(u32::MAX)) as u32;
 
     let tbody = &trk.orig_trak[8..];
     let mut new_trak_body = Vec::with_capacity(tbody.len() + trk.samples.len() * 4 + 128);
@@ -898,9 +910,9 @@ fn clean_fmp4_trak_for_mux(
     if trak.len() < 8 {
         return trak.to_vec();
     }
-    let media_dur_ticks = ((f64::from(movie_dur_ms) / 1000.0) * f64::from(timescale.max(1)))
-        .round()
-        .clamp(0.0, f64::from(u32::MAX)) as u64;
+    // `mvhd` is milliseconds; convert into the track clock with integer math.
+    let media_dur_ticks =
+        timescale::ms_to_ticks(movie_dur_ms, timescale, Round::Nearest).min(u64::from(u32::MAX));
     let tbody = &trak[8..];
     let mut new_tbody = Vec::with_capacity(tbody.len());
     for (k, s, e) in child_boxes(tbody) {
@@ -962,21 +974,14 @@ pub fn try_mux_fmp4<R1: Read + Seek, R2: Read + Seek, W: Write>(
         && !a_trk.samples.is_empty()
     {
         let movie_timescale = 1000u32;
-        let v_dur_s = v_trk
-            .samples
-            .iter()
-            .map(|s| u64::from(s.duration.max(1)))
-            .sum::<u64>() as f64
-            / f64::from(v_trk.timescale.max(1));
-        let a_dur_s = a_trk
-            .samples
-            .iter()
-            .map(|s| u64::from(s.duration.max(1)))
-            .sum::<u64>() as f64
-            / f64::from(a_trk.timescale.max(1));
-        let dur_ms = (v_dur_s.max(a_dur_s) * 1000.0)
-            .round()
-            .clamp(1.0, f64::from(u32::MAX)) as u32;
+        let dur_ms =
+            timescale::ticks_to_ms(media_duration_ticks(v_trk), v_trk.timescale, Round::Nearest)
+                .max(timescale::ticks_to_ms(
+                    media_duration_ticks(a_trk),
+                    a_trk.timescale,
+                    Round::Nearest,
+                ))
+                .max(1);
 
         let v_bytes: u64 = v_trk.samples.iter().map(|s| u64::from(s.size)).sum();
         let a_bytes: u64 = a_trk.samples.iter().map(|s| u64::from(s.size)).sum();
@@ -1032,9 +1037,7 @@ pub fn try_mux_fmp4<R1: Read + Seek, R2: Read + Seek, W: Write>(
         return Ok(false);
     };
     let duration_secs = v.duration_secs.max(a.duration_secs);
-    let dur_ms = (duration_secs * 1000.0)
-        .round()
-        .clamp(0.0, f64::from(u32::MAX)) as u32;
+    let dur_ms = timescale::secs_to_ms(duration_secs);
 
     v.trak = clean_fmp4_trak_for_mux(&v.trak, 1, dur_ms, v.timescale);
     a.trak = clean_fmp4_trak_for_mux(&a.trak, 2, dur_ms, a.timescale);
@@ -1074,19 +1077,21 @@ pub fn try_mux_fmp4<R1: Read + Seek, R2: Read + Seek, W: Write>(
     moov_body.extend_from_slice(&wrap_box(b"mvex", &mvex_body));
     let moov = wrap_box(b"moov", &moov_body);
 
-    // (decode seconds, is_video, moof_off, moof_len, mdat_off, mdat_len)
-    let mut order: Vec<(f64, bool, u64, u64, u64, u64)> = Vec::new();
+    // (decode ticks, timescale, is_video, moof_off, moof_len, mdat_off, mdat_len)
+    let mut order: Vec<(u64, u32, bool, u64, u64, u64, u64)> = Vec::new();
     for &(t, mo, ml, do_, dl) in &v.fragments {
-        order.push((t as f64 / f64::from(v.timescale), true, mo, ml, do_, dl));
+        order.push((t, v.timescale.max(1), true, mo, ml, do_, dl));
     }
     for &(t, mo, ml, do_, dl) in &a.fragments {
-        order.push((t as f64 / f64::from(a.timescale), false, mo, ml, do_, dl));
+        order.push((t, a.timescale.max(1), false, mo, ml, do_, dl));
     }
-    order.sort_by(|x, y| x.0.total_cmp(&y.0).then(y.1.cmp(&x.1)));
+    // Exact cross-multiplied ordering across two different time bases; identical
+    // decode times keep the video fragment first so the mdat stays A/V interleaved.
+    order.sort_by(|x, y| timescale::ratio_cmp(x.0, x.1, y.0, y.1).then(y.2.cmp(&x.2)));
 
     out.write_all(&ftyp)?;
     out.write_all(&moov)?;
-    for (seq, (_, is_video, mo, ml, do_, dl)) in order.into_iter().enumerate() {
+    for (seq, (_, _, is_video, mo, ml, do_, dl)) in order.into_iter().enumerate() {
         let mut moof = vec![0u8; ml as usize];
         let track_id = if is_video { 1 } else { 2 };
         if is_video {
@@ -1873,61 +1878,76 @@ pub fn try_trim_fmp4<R: Read + Seek, W: Write>(
     if let Some(mut tracks) = defrag_opt
         && !tracks.is_empty()
     {
-        let start_s = start_sec.max(0.0);
-        let end_s = (start_s + duration_sec.max(0.1)).max(start_s + 0.1);
+        // Quantise the CLI seconds to integer nanoseconds once; every later step is integer math.
+        let start_ns = timescale::secs_to_nanos(start_sec);
+        let end_ns = start_ns
+            .saturating_add(timescale::secs_to_nanos(duration_sec.max(0.1)))
+            .max(start_ns.saturating_add(timescale::secs_to_nanos(0.1)));
 
-        // Anchor clip start on the last video keyframe at or before start_s
-        let actual_start_s = if let Some(v_trk) = tracks.iter().find(|t| !t.is_audio) {
-            let v_ts = f64::from(v_trk.timescale.max(1));
+        // Anchor clip start on the last video keyframe at or before start_ns (50 ms leeway)
+        let start_bound_ns = start_ns.saturating_add(50_000_000);
+        let actual_start_ns = if let Some(v_trk) = tracks.iter().find(|t| !t.is_audio) {
+            let v_ts = v_trk.timescale.max(1);
+            let to_ns = |t: u64| timescale::ticks_to_nanos(t, v_ts, Round::Floor);
             v_trk
                 .samples
                 .iter()
-                .filter(|s| s.is_sync && (s.dts as f64 / v_ts) <= start_s + 0.05)
-                .map(|s| s.dts as f64 / v_ts)
+                .filter(|s| s.is_sync && to_ns(s.dts) <= start_bound_ns)
+                .map(|s| to_ns(s.dts))
                 .next_back()
-                .or_else(|| v_trk.samples.first().map(|s| s.dts as f64 / v_ts))
-                .unwrap_or(0.0)
+                .or_else(|| v_trk.samples.first().map(|s| to_ns(s.dts)))
+                .unwrap_or(0)
         } else {
             let a_trk = &tracks[0];
-            let a_ts = f64::from(a_trk.timescale.max(1));
+            let a_ts = a_trk.timescale.max(1);
+            let audio_bound_ns = start_ns.saturating_add(20_000_000);
             a_trk
                 .samples
                 .iter()
-                .filter(|s| (s.dts as f64 / a_ts) <= start_s + 0.02)
-                .map(|s| s.dts as f64 / a_ts)
+                .filter(|s| timescale::ticks_to_nanos(s.dts, a_ts, Round::Floor) <= audio_bound_ns)
+                .map(|s| timescale::ticks_to_nanos(s.dts, a_ts, Round::Floor))
                 .next_back()
-                .unwrap_or(0.0)
+                .unwrap_or(0)
         };
 
-        let actual_end_s = (actual_start_s + (end_s - start_s).max(0.1)).max(end_s);
+        let actual_end_ns = actual_start_ns
+            .saturating_add(
+                end_ns
+                    .saturating_sub(start_ns)
+                    .max(timescale::secs_to_nanos(0.1)),
+            )
+            .max(end_ns);
 
-        // Slice each track's individual samples to [actual_start_s, actual_end_s]
+        // Slice each track's individual samples to [actual_start_ns, actual_end_ns]
         for trk in &mut tracks {
-            let ts = f64::from(trk.timescale.max(1));
+            let ts = trk.timescale.max(1);
             let first_idx = if trk.is_audio {
-                // Pick the exact AAC frame (~23.2ms) whose presentation interval covers or starts at actual_start_s
+                // Pick the exact AAC frame (~23.2 ms) whose midpoint reaches actual_start_ns
                 trk.samples
                     .iter()
                     .position(|s| {
-                        ((s.dts + u64::from(s.duration / 2)) as f64 / ts) >= actual_start_s
+                        let mid = s.dts.saturating_add(u64::from(s.duration / 2));
+                        timescale::ticks_to_nanos(mid, ts, Round::Nearest) >= actual_start_ns
                     })
                     .unwrap_or(0)
             } else {
+                // 100 µs of tolerance keeps a keyframe landing exactly on the cut
+                let starts_at_or_after = |s: &DefragSample| {
+                    timescale::ticks_to_nanos(s.dts, ts, Round::Floor).saturating_add(100_000)
+                        >= actual_start_ns
+                };
                 trk.samples
                     .iter()
-                    .position(|s| s.is_sync && (s.dts as f64 / ts) + 1e-4 >= actual_start_s)
-                    .or_else(|| {
-                        trk.samples
-                            .iter()
-                            .position(|s| (s.dts as f64 / ts) + 1e-4 >= actual_start_s)
-                    })
+                    .position(|s| s.is_sync && starts_at_or_after(s))
+                    .or_else(|| trk.samples.iter().position(starts_at_or_after))
                     .unwrap_or(0)
             };
 
+            let end_bound_ns = actual_end_ns.saturating_add(20_000_000);
             let end_idx = trk
                 .samples
                 .iter()
-                .rposition(|s| (s.dts as f64 / ts) < actual_end_s + 0.02)
+                .rposition(|s| timescale::ticks_to_nanos(s.dts, ts, Round::Floor) < end_bound_ns)
                 .map(|i| (i + 1).min(trk.samples.len()))
                 .unwrap_or(trk.samples.len())
                 .max((first_idx + 1).min(trk.samples.len()));
@@ -1945,14 +1965,10 @@ pub fn try_trim_fmp4<R: Read + Seek, W: Write>(
             let max_dur_s = tracks
                 .iter()
                 .map(|t| {
-                    t.samples
-                        .iter()
-                        .map(|s| u64::from(s.duration.max(1)))
-                        .sum::<u64>() as f64
-                        / f64::from(t.timescale.max(1))
+                    timescale::ticks_to_ms(media_duration_ticks(t), t.timescale, Round::Nearest)
                 })
-                .fold(0.5f64, f64::max);
-            let dur_ms = (max_dur_s * 1000.0).round().clamp(1.0, f64::from(u32::MAX)) as u32;
+                .fold(1u32, u32::max);
+            let dur_ms = max_dur_s.max(1);
 
             let total_payload: u64 = tracks
                 .iter()
@@ -2326,9 +2342,12 @@ pub fn try_trim_webm<R: Read + Seek, W: Write>(
         return Ok(false);
     }
 
-    let ticks_per_sec = 1_000_000_000.0 / (timestamp_scale as f64);
-    let start_ticks = (start_sec.max(0.0) * ticks_per_sec).round() as u64;
-    let end_ticks = ((start_sec.max(0.0) + duration_sec.max(0.1)) * ticks_per_sec).round() as u64;
+    // Integer rescale: an EBML timestamp is `nanoseconds / TimestampScale` ticks.
+    let tick_ns = timestamp_scale.max(1);
+    let start_ns = timescale::secs_to_nanos(start_sec);
+    let end_ns = start_ns.saturating_add(timescale::secs_to_nanos(duration_sec.max(0.1)));
+    let start_ticks = timescale::nanos_to_scaled(start_ns, tick_ns, Round::Floor);
+    let end_ticks = timescale::nanos_to_scaled(end_ns, tick_ns, Round::Ceil);
 
     // Anchor on the last track-1 (video keyframe) cluster at or before start_ticks
     let base_ts = clusters
@@ -2345,7 +2364,7 @@ pub fn try_trim_webm<R: Read + Seek, W: Write>(
         })
         .unwrap_or(clusters[0].0);
 
-    let margin_ticks = (0.5 * ticks_per_sec).round() as u64;
+    let margin_ticks = timescale::nanos_to_scaled(500_000_000, tick_ns, Round::Nearest);
     let audio_base_ts = clusters
         .iter()
         .filter(|(ts, trk, _, _)| *trk != 1 && *ts <= base_ts + 50)
@@ -2366,8 +2385,15 @@ pub fn try_trim_webm<R: Read + Seek, W: Write>(
     }
 
     let last_ts = kept.last().map(|c| c.0).unwrap_or(base_ts);
-    let clip_dur_ticks =
-        ((last_ts.saturating_sub(base_ts)) as f64).max(duration_sec.max(0.1) * ticks_per_sec);
+    // `Duration` is an EBML float element, so the value stays a float on the wire;
+    // the ticks themselves are computed with integer math.
+    let clip_dur_ticks = last_ts
+        .saturating_sub(base_ts)
+        .max(timescale::nanos_to_scaled(
+            timescale::secs_to_nanos(duration_sec.max(0.1)),
+            tick_ns,
+            Round::Ceil,
+        )) as f64;
 
     let mut info = Vec::new();
     info.extend_from_slice(&uint_elem(ID_TIMESTAMP_SCALE, timestamp_scale));
