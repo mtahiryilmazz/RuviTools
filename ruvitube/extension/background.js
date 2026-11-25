@@ -13,7 +13,7 @@ const SETTINGS_KEY = 'ruvitube.settings';
 const MAX_ACTIVE = 2;
 const JOB_TTL_MS = 6 * 60 * 60 * 1000;
 
-chrome.storage.session.set({ 'ruvitube.bgVersion': 'sw-2.2.0-ruvi' }).catch(() => {});
+chrome.storage.session.set({ 'ruvitube.bgVersion': 'sw-2.5.0-ruvi' }).catch(() => {});
 
 const VIDEO_QUALITIES = [
   'best', 'h264', 'mp4-h264', '4320p60', '4320p', '2160p60', '2160p',

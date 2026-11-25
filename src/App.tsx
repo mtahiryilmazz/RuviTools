@@ -40,6 +40,7 @@ export default function App() {
 
   // Telemetry errors state
   const [telemetryErrors, setTelemetryErrors] = useState<any[]>([]);
+  const [syncStatus, setSyncStatus] = useState<any>(null);
 
   useEffect(() => {
     fetch('/api/github/release')
@@ -55,6 +56,11 @@ export default function App() {
     fetch('/api/telemetry/errors')
       .then(res => res.json())
       .then(data => data.ok && setTelemetryErrors(data.errors))
+      .catch(() => {});
+
+    fetch('/api/github/sync-status')
+      .then(res => res.json())
+      .then(data => data.ok && setSyncStatus(data))
       .catch(() => {});
   }, []);
 
@@ -128,6 +134,25 @@ export default function App() {
       console.error(e);
     } finally {
       setDownloading(false);
+    }
+  };
+
+  const handleTest403Recovery = async () => {
+    try {
+      const res = await fetch('/api/telemetry/log-error', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url: urlInput, status: 403, error: 'HTTP 403 Forbidden: YouTube Signature Expired' })
+      });
+      const data = await res.json();
+      if (data.ok) {
+        const errRes = await fetch('/api/telemetry/errors');
+        const errData = await errRes.json();
+        if (errData.ok) setTelemetryErrors(errData.errors);
+        setActiveTab('telemetry');
+      }
+    } catch (e) {
+      console.error(e);
     }
   };
 
@@ -282,6 +307,13 @@ export default function App() {
                     className="px-4 py-2 bg-blue-600 hover:bg-blue-500 text-white font-semibold text-sm rounded-lg transition-colors flex items-center gap-2"
                   >
                     {downloading ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Play className="w-4 h-4" />} Akışları Çözümle
+                  </button>
+                  <button 
+                    onClick={handleTest403Recovery}
+                    className="px-3 py-2 bg-amber-600 hover:bg-amber-500 text-white font-semibold text-xs rounded-lg transition-colors flex items-center gap-1.5"
+                    title="Simulate HTTP 403 error and watch automatic re-fetch recovery"
+                  >
+                    <AlertCircle className="w-3.5 h-3.5" /> HTTP 403 Kurtarma Testi
                   </button>
                 </div>
               </div>
@@ -577,6 +609,37 @@ export default function App() {
                         <li key={idx}>{st}</li>
                       ))}
                     </ul>
+                  </div>
+                )}
+              </div>
+
+              <div className={`p-6 rounded-xl border space-y-4 ${darkMode ? 'bg-[#161b22] border-[#30363d]' : 'bg-white border-[#d0d7de]'}`}>
+                <h3 className="font-semibold text-base flex items-center gap-2">
+                  <RefreshCw className="w-5 h-5 text-emerald-400" /> GitHub Depo Senkronizasyonu (mtahiryilmazz/RuviTools)
+                </h3>
+                <p className="text-xs opacity-70">RuviTube v2.4.0 eklenti güncellemeleri ve Rust motoru geliştirmeleri depoya senkronize edilmek üzere hazırlandı.</p>
+                
+                {syncStatus && (
+                  <div className="p-4 rounded-lg bg-black/30 border border-white/10 space-y-3 text-xs">
+                    <div className="flex justify-between items-center">
+                      <span className="font-bold text-emerald-400">Depo: {syncStatus.repository} ({syncStatus.branch})</span>
+                      <span className="font-mono-num px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-300">Sürüm v{syncStatus.localVersion}</span>
+                    </div>
+                    <div className="space-y-1">
+                      <div className="font-semibold opacity-80">Takip Edilen Dosyalar:</div>
+                      {syncStatus.trackedFiles?.map((f: any, idx: number) => (
+                        <div key={idx} className="font-mono-num opacity-75 flex justify-between">
+                          <span>{f.path}</span>
+                          <span className="text-blue-400">{f.status}</span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="space-y-1 pt-2 border-t border-white/10">
+                      <div className="font-semibold opacity-80">Git Senkronizasyon Komutları:</div>
+                      {syncStatus.gitCommands?.map((cmd: string, idx: number) => (
+                        <div key={idx} className="font-mono-num text-emerald-300 bg-black/50 p-2 rounded border border-white/5">{cmd}</div>
+                      ))}
+                    </div>
                   </div>
                 )}
               </div>

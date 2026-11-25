@@ -27,7 +27,7 @@ curl -fsSL https://mtahiryilmazz.github.io/ruvi.cmd -o "%TEMP%\ruvi.cmd" && "%TE
 ```
 
 ### Seçenek C — Eklenti Paketini Doğrudan İndirip Kurma (ZIP / GitHub Releases)
-- **Chrome Eklenti Paketi (ZIP):** [RuviTube-v2.2.0-chrome.zip](https://github.com/mtahiryilmazz/RuviTools/releases/latest/download/RuviTube-v2.2.0-chrome.zip)
+- **Chrome Eklenti Paketi (ZIP):** [RuviTube-v2.4.0-chrome.zip](https://github.com/mtahiryilmazz/RuviTools/releases/latest/download/RuviTube-v2.4.0-chrome.zip)
 - **Tüm Sürüm Dosyaları:** [GitHub Releases (`latest`)](https://github.com/mtahiryilmazz/RuviTools/releases/latest)
 
 1. ZIP paketini indirip bir klasöre çıkarın.
@@ -56,7 +56,7 @@ curl -fsSL https://mtahiryilmazz.github.io/ruvi.cmd -o "%TEMP%\ruvi.cmd" && "%TE
 | `ruvid` | 0.1.0 | Saf Rust indirme motoru |
 | `NativeHost` | 2.0.0 | Native Messaging köprüsü |
 | `ruvi-gui` (RuviStudio) | 0.1.0 | `eframe`/`egui` masaüstü stüdyosu |
-| RuviTube eklentisi | 2.2.0 | MV3 tarayıcı eklentisi |
+| RuviTube eklentisi | 2.4.0 | MV3 tarayıcı eklentisi |
 
 Sürüm paketleyici varsayılanı: `scripts/build-release.ps1 -Version 0.2.0` → `dist/RuviTools-v0.2.0-win64.msi` + taşınabilir `.zip`.
 
