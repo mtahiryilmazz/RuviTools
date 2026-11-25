@@ -1240,7 +1240,7 @@ checksum = "c1741bfe603a47c4bb263f00d4f8d65a97ae4a970a26287f1c38ff00aa9a52ae"
 
 [[package]]
 name = "ruvi-native-host"
-version = "2.1.0"
+version = "2.2.0"
 dependencies = [
  "mimalloc",
  "ruvic",
@@ -1254,7 +1254,6 @@ dependencies = [
 name = "ruvic"
 version = "0.3.0"
 dependencies = [
- "anyhow",
  "async-trait",
  "clap",
  "clap_complete",

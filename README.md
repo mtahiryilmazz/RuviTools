@@ -27,7 +27,7 @@ curl -fsSL https://mtahiryilmazz.github.io/ruvi.cmd -o "%TEMP%\ruvi.cmd" && "%TE
 ```
 
 ### Seçenek C — Eklenti Paketini Doğrudan İndirip Kurma (ZIP / GitHub Releases)
-- **Chrome Eklenti Paketi (ZIP):** [RuviTube-v2.6.0-chrome.zip](https://github.com/mtahiryilmazz/RuviTools/releases/latest/download/RuviTube-v2.6.0-chrome.zip)
+- **Chrome Eklenti Paketi (ZIP):** [RuviTube-v2.7.0-chrome.zip](https://github.com/mtahiryilmazz/RuviTools/releases/latest/download/RuviTube-v2.7.0-chrome.zip)
 - **Tüm Sürüm Dosyaları:** [GitHub Releases (`latest`)](https://github.com/mtahiryilmazz/RuviTools/releases/latest)
 
 1. ZIP paketini indirip bir klasöre çıkarın.
@@ -55,9 +55,9 @@ curl -fsSL https://mtahiryilmazz.github.io/ruvi.cmd -o "%TEMP%\ruvi.cmd" && "%TE
 | :--- | :--- | :--- |
 | `ruvic` | **0.3.0** | Saf Rust medya dönüştürme hattı ve MP3 düzeltmeleri |
 | `ruvid` | **0.2.0** | Saf Rust indirme motoru düzeltmeleri |
-| `NativeHost` | **2.1.0** | Native Messaging köprüsü |
+| `NativeHost` | **2.2.0** | Native Messaging köprüsü |
 | `ruvi-gui` (RuviStudio) | 0.1.0 | `eframe`/`egui` masaüstü stüdyosu |
-| RuviTube eklentisi | **2.6.0** | MV3 tarayıcı eklentisi; GitHub sürüm kontrolü |
+| RuviTube eklentisi | **2.7.0** | MV3 tarayıcı eklentisi; GitHub sürüm kontrolü |
 
 Sürüm paketleyici varsayılanı: `scripts/build-release.ps1 -Version 0.3.0` → `dist/RuviTools-v0.3.0-win64.msi` + taşınabilir `.zip`.
 
@@ -85,6 +85,7 @@ Sürüm paketleyici varsayılanı: `scripts/build-release.ps1 -Version 0.3.0` �
   - **Liste (Tümü):** Tüm video ve ses formatları.
   - **Video:** `4K (2160p)`, `2K (1440p)`, `1080p60`, `720p60`, `480p`, `360p` gerçek boyut bilgili satırlar.
   - **Ses:** `MP3 320 kbps`, `MP3 256 kbps`, `MP3 192 kbps`, `MP3 VBR`, `Orijinal M4A`, `Kayıpsız WAV`.
+  - **Oynatma listesi:** YouTube oynatma listesi sayfasında en fazla 100 videoyu MP4 veya MP3 olarak mevcut kuyruğa ekler; mevcut Rust playlist ayrıştırıcısı kullanılır. İlk kullanım için NativeHost 2.2.0 All-in-One ile kurulu olmalıdır.
   - **Makas (Kesit & Bölümler):** Videodaki tüm YouTube bölümlerini (`chapters`) gerçek başlıklarıyla (`1. ...`, `2. ...`) listeler; her bölüm için tek tıkla **MP4** veya **MP3** indirme ve özel başlangıç–bitiş zaman aralığı seçici sunar.
 
 ---

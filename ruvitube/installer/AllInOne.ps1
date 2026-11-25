@@ -23,7 +23,7 @@ New-Item -ItemType Directory -Force -Path $AppDir | Out-Null
 $UpdaterScript = Join-Path $AppDir 'Update-Extension.ps1'
 $UpdaterUrl = 'https://raw.githubusercontent.com/mtahiryilmazz/RuviTools/main/ruvitube/installer/Update-Extension.ps1'
 $wc = New-Object System.Net.WebClient
-$wc.Headers['User-Agent'] = 'RuviTube-AllInOne/2.6.0'
+$wc.Headers['User-Agent'] = 'RuviTube-AllInOne/2.7.0'
 try {
   $wc.DownloadFile($UpdaterUrl, $UpdaterScript)
   if ((Get-Item -LiteralPath $UpdaterScript).Length -lt 1024) {
@@ -44,7 +44,7 @@ foreach ($tool in $Tools) {
   Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
   Write-Host ("Indiriliyor: {0} -> {1}" -f $tool, $dst) -ForegroundColor Cyan
   $wc = New-Object System.Net.WebClient
-  $wc.Headers['User-Agent'] = 'RuviTube-AllInOne/2.6.0'
+  $wc.Headers['User-Agent'] = 'RuviTube-AllInOne/2.7.0'
   try {
     $wc.DownloadFile($url, $tmp)
   } finally {
@@ -60,13 +60,13 @@ foreach ($tool in $Tools) {
 }
 
 # Eklenti paketini indir ve %LOCALAPPDATA%\RuviTube\extension altina ac
-$extZipUrl = "$BaseUrl/RuviTube-v2.6.0-chrome.zip"
+$extZipUrl = "$BaseUrl/RuviTube-v2.7.0-chrome.zip"
 $extZipTmp = Join-Path $AppDir 'RuviTube-chrome.zip.download'
 try {
   Remove-Item -LiteralPath $extZipTmp -Force -ErrorAction SilentlyContinue
-  Write-Host ("Indiriliyor: RuviTube-v2.6.0-chrome.zip -> {0}" -f $ExtDir) -ForegroundColor Cyan
+  Write-Host ("Indiriliyor: RuviTube-v2.7.0-chrome.zip -> {0}" -f $ExtDir) -ForegroundColor Cyan
   $wc = New-Object System.Net.WebClient
-  $wc.Headers['User-Agent'] = 'RuviTube-AllInOne/2.6.0'
+  $wc.Headers['User-Agent'] = 'RuviTube-AllInOne/2.7.0'
   try {
     $wc.DownloadFile($extZipUrl, $extZipTmp)
   } finally {

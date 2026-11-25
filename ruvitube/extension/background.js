@@ -13,7 +13,7 @@ const SETTINGS_KEY = 'ruvitube.settings';
 const MAX_ACTIVE = 2;
 const JOB_TTL_MS = 6 * 60 * 60 * 1000;
 
-chrome.storage.session.set({ 'ruvitube.bgVersion': 'sw-2.6.0-ruvi' }).catch(() => {});
+chrome.storage.session.set({ 'ruvitube.bgVersion': 'sw-2.7.0-ruvi' }).catch(() => {});
 
 const VIDEO_QUALITIES = [
   'best', 'h264', 'mp4-h264', '4320p60', '4320p', '2160p60', '2160p',
@@ -373,6 +373,30 @@ function probeNative(url) {
   });
 }
 
+function probePlaylistNative(url) {
+  return new Promise((resolve, reject) => {
+    const jobId = 'playlist-' + Date.now().toString(36);
+    let port;
+    try { port = chrome.runtime.connectNative(HOST); }
+    catch (e) { reject(new Error((e && e.message) || 'Native Host başlatılamadı.')); return; }
+    let settled = false;
+    const finish = (ok, value) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      try { port.disconnect(); } catch (_) {}
+      if (ok) resolve(value); else reject(new Error(value.error || 'Oynatma listesi alınamadı.'));
+    };
+    const timer = setTimeout(() => finish(false, { error: 'Oynatma listesi çözümleme zaman aşımı.' }), 30000);
+    port.onMessage.addListener(msg => {
+      if (msg && msg.action === 'playlist_result') finish(!!msg.ok, msg);
+    });
+    port.onDisconnect.addListener(() => finish(false, { error: chrome.runtime.lastError?.message || 'Native Host bağlantısı kesildi.' }));
+    try { port.postMessage({ action: 'playlist', jobId, url }); }
+    catch (e) { finish(false, { error: e.message }); }
+  });
+}
+
 const downloadIndex = new Map();
 
 async function startChromeDownload(job, fileUrl, fileName) {
@@ -491,8 +515,8 @@ function checkNativeHost() {
       finish({ ok: false, error: (e && e.message) || 'Native Host başlatılamadı.' });
       return;
     }
-    port.onMessage.addListener(() => {
-      finish({ ok: true });
+    port.onMessage.addListener(msg => {
+      finish({ ok: true, version: msg && msg.version ? String(msg.version) : '' });
     });
     port.onDisconnect.addListener(() => {
       const err = chrome.runtime.lastError;
@@ -564,6 +588,51 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     probeNative(url)
       .then(data => sendResponse({ ok: true, data }))
       .catch(e => sendResponse({ ok: false, error: (e && e.message) || 'Çözümleme hatası.' }));
+    return true;
+  }
+
+  if (message.action === 'download_playlist') {
+    const url = String(message.url || '');
+    if (!/^https:\/\/(?:www\.|m\.|music\.)?youtube\.com\/(?:watch\?[^#]*&)?playlist\?[^#]*list=[\w-]+/.test(url)
+      && !/^https:\/\/(?:www\.|m\.|music\.)?youtube\.com\/(?:watch\?[^#]*&)?[^#]*list=[\w-]+/.test(url)) {
+      sendResponse({ ok: false, error: 'YouTube oynatma listesi bağlantısı geçersiz.' });
+      return;
+    }
+    (async () => {
+      const host = await checkNativeHost();
+      if (!host.ok) throw new Error(host.error || 'Native Host kurulmamış.');
+      if (!host.version || compareVersions(host.version, '2.2.0') < 0) {
+        throw new Error('Oynatma listesi için Native Host 2.2.0 gerekli. All-in-One kurulumunu bir kez yeniden çalıştırın.');
+      }
+      const result = await probePlaylistNative(url);
+      const entries = Array.isArray(result.entries) ? result.entries.slice(0, 100) : [];
+      if (!entries.length) throw new Error('Oynatma listesinde indirilebilir video bulunamadı.');
+      const type = normalizeMediaType(message.type);
+      const quality = normalizeQuality(type, String(message.quality || ''));
+      const settings = await getSettings();
+      const jobsCount = normalizeJobs(message.jobs ?? settings.jobs);
+      const tabId = sender && sender.tab ? sender.tab.id : null;
+      const now = Date.now();
+      const queuedJobs = entries.map(entry => {
+        const jobId = (self.crypto && crypto.randomUUID) ? crypto.randomUUID()
+          : now.toString(36) + '-' + Math.random().toString(36).slice(2, 10);
+        const title = String(entry.title || `Liste videosu ${entry.index}`).slice(0, 200);
+        return {
+          jobId, tabId, type, quality, jobs: jobsCount, url: entry.url,
+          clip: null, channel: '', title, audioLang: '',
+          label: `${entry.index}. ${title}`.slice(0, 80),
+          state: 'queued', percent: 0, status: 'Hazırlanıyor...', createdAt: now, updatedAt: now
+        };
+      });
+      await withLock(async () => {
+        const jobs = await getJobs();
+        for (const job of queuedJobs) jobs[job.jobId] = job;
+        await persist(jobs);
+        updateBadge(jobs);
+      });
+      for (let i = 0; i < MAX_ACTIVE; i += 1) promoteQueued();
+      return { ok: true, count: entries.length };
+    })().then(sendResponse).catch(error => sendResponse({ ok: false, error: error.message || 'Liste indirilemedi.' }));
     return true;
   }
 

@@ -1010,8 +1010,23 @@
     });
 
     const clipOpenBtn = el('button', { class: 'foot-ico-btn', type: 'button', title: 'Özel Kesit Zaman Seçici (Başlangıç–Bitiş)' }, '✂');
+    const playlistBtn = el('button', { class: 'foot-ico-btn', type: 'button', title: 'YouTube oynatma listesini indir', 'aria-label': 'Oynatma listesini indir' }, '☷');
     const folderBtn = el('button', { class: 'foot-ico-btn', type: 'button', title: 'İndirilenler Klasörünü Aç' }, '📁');
-    const footEl = el('div', { class: 'foot' }, spdGroup, el('div', { class: 'foot-actions' }, clipOpenBtn, folderBtn));
+    playlistBtn.addEventListener('click', ev => {
+      ev.stopPropagation();
+      const choice = window.prompt('Liste biçimi: 1 = MP4 video, 2 = MP3 ses', '1');
+      if (choice !== '1' && choice !== '2') return;
+      if (!window.confirm('YouTube listesindeki en fazla 100 video indirme kuyruğuna eklenecek. Devam edilsin mi?')) return;
+      const type = choice === '2' ? 'MP3' : 'Video';
+      const quality = type === 'MP3' ? (state.settings.audioQuality || '320kbps') : (state.settings.videoQuality || '1080p');
+      showStatus('Oynatma listesi okunuyor...');
+      chrome.runtime.sendMessage({ action: 'download_playlist', url: location.href, type, quality, jobs: state.settings.jobs }, response => {
+        const err = chrome.runtime.lastError;
+        if (err || !response?.ok) showStatus('Liste hatası: ' + (err?.message || response?.error || 'İşlem başarısız.'));
+        else showStatus(`${response.count} video indirme kuyruğuna eklendi.`);
+      });
+    });
+    const footEl = el('div', { class: 'foot' }, spdGroup, el('div', { class: 'foot-actions' }, clipOpenBtn, playlistBtn, folderBtn));
 
     const menuEl = el('div', { class: 'menu', role: 'menu' }, metaEl, tabsEl, favStripEl, listEl, footEl);
     const wrapEl = el('div', { class: 'wrap' }, pillBtn, dismissBtn, menuEl);
@@ -1155,6 +1170,9 @@
       const durStr = data && data.isLive ? 'CANLI' : formatDuration(duration);
       durPill.textContent = durStr;
       durPill.style.display = durStr ? 'inline-block' : 'none';
+      let hasPlaylist = false;
+      try { hasPlaylist = !!new URL(location.href).searchParams.get('list'); } catch (_) {}
+      playlistBtn.style.display = hasPlaylist ? 'inline-flex' : 'none';
 
       tabsEl.textContent = '';
       favStripEl.textContent = '';

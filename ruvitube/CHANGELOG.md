@@ -1,6 +1,12 @@
 # Changelog
-
 Tüm önemli değişiklikler bu dosyada tutulur. Biçim: [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/), sürümleme: SemVer.
+
+## [2.7.0] — 2026-11-25
+
+### Eklendi
+- YouTube oynatma listeleri için MP4 veya MP3 toplu indirme; mevcut RuviTube kuyruğu kullanılır ve bir listeden en fazla 100 video sıraya eklenir.
+- Native Host yalnızca YouTube playlist adreslerini kabul ederek mevcut Rust playlist ayrıştırıcısını çağırır. Eski Native Host sürümünde yeniden All-in-One kurulum uyarısı gösterilir.
+- Eklenti 2.7.0, Native Host 2.2.0.
 
 ## [2.6.0] — 2026-11-25
 

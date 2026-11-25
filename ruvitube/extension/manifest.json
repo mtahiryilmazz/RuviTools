@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "RuviTube",
-  "version": "2.6.0",
-  "description": "RuviTube v2.6 (RuviTools Saf Rust Motoru): 16 parçalı indirme, MP3 dönüştürme ilerlemesi ve GitHub sürüm denetimi.",
+  "version": "2.7.0",
+  "description": "RuviTube v2.7 (RuviTools Saf Rust Motoru): 16 parçalı indirme, MP3 dönüştürme ilerlemesi ve GitHub sürüm denetimi.",
   "default_locale": "tr",
   "minimum_chrome_version": "116",
   "permissions": [
