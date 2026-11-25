@@ -8,13 +8,14 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+use ruvic::backend::{MediaBackend, ProgressSink, ProgressUpdate};
 use ruvic::backend::native::NativeMediaBackend;
 use ruvic::backend::native::audio_transcode::{
     parse_smart_title_metadata, write_id3v23_to_mp3_file,
 };
 use ruvic::backend::native::dual_mux::inject_fmp4_itunes_metadata_file;
 use ruvic::config::RuvicConfig;
-use ruvic::operations::extract_audio::{ExtractAudioRequest, execute_extract_audio};
+use ruvic::operations::extract_audio::{ExtractAudioRequest, execute_extract_audio_with_sink};
 use ruvic::operations::remux::{RemuxRequest, execute_remux};
 use ruvic::operations::trim::{TrimRequest, execute_trim};
 use ruvid::config::RuvidConfig;
@@ -22,6 +23,7 @@ use ruvid::domain::download_job::DownloadJob;
 use ruvid::downloader::execute_download_with_progress;
 use ruvid::resolver::ResolveContext;
 use ruvid::resolver::registry::ResolverRegistry;
+use ruvid::resolver::registry::fetch_playlist_entries;
 use ruvid::storage::sanitize_filename;
 use ruvid::telemetry::ProgressCallback;
 use serde::{Deserialize, Serialize};
@@ -32,6 +34,54 @@ const MAX_LOG_BYTES: u64 = 2 * 1024 * 1024;
 const DEFAULT_JOBS: usize = 4;
 const MIN_JOBS: usize = 1;
 const MAX_JOBS: usize = 16;
+
+struct NativeProgressSink<W> {
+    out: Arc<Mutex<W>>,
+    job_id: String,
+    total_duration_us: Option<u64>,
+    label: &'static str,
+}
+
+impl<W: Write + Send + 'static> ProgressSink for NativeProgressSink<W> {
+    fn on_progress(&self, update: ProgressUpdate) {
+        let elapsed_us = update.out_time_us.unwrap_or(0);
+        let total_us = self.total_duration_us.unwrap_or(0);
+        let percent = if update.finished {
+            98
+        } else if total_us > 0 {
+            (88 + ((elapsed_us.min(total_us) as f64 / total_us as f64) * 10.0).floor() as u64)
+                .min(97)
+        } else {
+            89
+        };
+        let status = if total_us > 0 {
+            format!(
+                "{}: {} / {}",
+                self.label,
+                format_media_time(elapsed_us),
+                format_media_time(total_us)
+            )
+        } else if elapsed_us > 0 {
+            format!("{}: {}", self.label, format_media_time(elapsed_us))
+        } else {
+            format!("{}...", self.label)
+        };
+        send_native_message(
+            &self.out,
+            &json!({
+                "jobId": self.job_id,
+                "percent": percent,
+                "status": status,
+                "speed": update.speed.clone().unwrap_or_default()
+            }),
+        );
+    }
+}
+
+fn format_media_time(microseconds: u64) -> String {
+    let seconds = microseconds / 1_000_000;
+    format!("{:02}:{:02}", seconds / 60, seconds % 60)
+}
 
 #[derive(Debug, Clone, Deserialize)]
 struct ClipSpec {
@@ -65,6 +115,8 @@ struct IncomingMessage {
     channel: String,
     #[serde(default)]
     title: String,
+    #[serde(default)]
+    version: String,
     #[serde(default, rename = "audioLang")]
     audio_lang: String,
 }
@@ -222,6 +274,9 @@ fn is_allowed_youtube_url(url: &str) -> bool {
     }
     let without_frag = url.split('#').next().unwrap_or(url);
     let allowed_prefixes = [
+        "https://www.youtube.com/playlist?",
+        "https://m.youtube.com/playlist?",
+        "https://music.youtube.com/playlist?",
         "https://www.youtube.com/watch?",
         "https://m.youtube.com/watch?",
         "https://music.youtube.com/watch?",
@@ -576,6 +631,65 @@ async fn handle_probe_job<W: Write>(
     }
 }
 
+async fn handle_playlist_job<W: Write>(msg: IncomingMessage, out: Arc<Mutex<W>>) {
+    let job_id = msg.job_id.clone();
+    let valid_playlist = is_allowed_youtube_url(&msg.url) && has_playlist_id(&msg.url);
+    if !is_valid_job_id(&job_id) || !valid_playlist {
+        send_native_message(&out, &json!({"jobId":job_id,"action":"playlist_result","done":true,"ok":false,"error":"Geçerli bir YouTube oynatma listesi adresi gerekli."}));
+        return;
+    }
+    let cfg = RuvidConfig::default();
+    let ctx = match ResolveContext::build(&cfg.network.user_agent, cfg.network.connect_timeout_seconds, 20, None, &[], false, 2) {
+        Ok(ctx) => ctx,
+        Err(error) => {
+            send_native_message(
+                &out,
+                &json!({"jobId":job_id,"action":"playlist_result","done":true,"ok":false,"error":error.to_string()}),
+            );
+            return;
+        }
+    };
+    match fetch_playlist_entries(&ctx, &msg.url).await {
+        Ok(entries) => {
+            let entries: Vec<Value> = entries
+                .into_iter()
+                .take(100)
+                .map(|entry| {
+                    json!({
+                        "index": entry.index,
+                        "title": entry.title.unwrap_or_default(),
+                        "url": entry.url
+                    })
+                })
+                .collect();
+            send_native_message(
+                &out,
+                &json!({"jobId":job_id,"action":"playlist_result","done":true,"ok":true,"entries":entries}),
+            );
+        }
+        Err(error) => send_native_message(
+            &out,
+            &json!({"jobId":job_id,"action":"playlist_result","done":true,"ok":false,"error":error.to_string()}),
+        ),
+    }
+}
+
+fn has_playlist_id(url: &str) -> bool {
+    url.split_once('?')
+        .map(|(_, query)| {
+            query.split('&').any(|part| {
+                part.strip_prefix("list=")
+                    .is_some_and(|id| {
+                        !id.is_empty()
+                            && id
+                                .bytes()
+                                .all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-')
+                    })
+            })
+        })
+        .unwrap_or(false)
+}
+
 async fn handle_download_job(msg: IncomingMessage, out: Arc<Mutex<io::Stdout>>) {
     handle_download_job_with_config(msg, out, HostRuntimeConfig::default()).await;
 }
@@ -925,7 +1039,23 @@ async fn handle_download_job_with_config<W: Write + Send + 'static>(
             },
             duration: if is_mp3 || is_wav { clip_dur } else { None },
         };
-        if let Err(e) = execute_extract_audio(&backend, &ruvic_cfg, audio_req, false).await {
+        let source_duration = backend
+            .probe(&working_path)
+            .await
+            .ok()
+            .and_then(|info| info.container.duration_seconds);
+        let conversion_duration = clip_dur.or(source_duration);
+        let progress = NativeProgressSink {
+            out: Arc::clone(&out),
+            job_id: job_id.clone(),
+            total_duration_us: conversion_duration
+                .filter(|duration| duration.is_finite() && *duration > 0.0)
+                .map(|duration| (duration * 1_000_000.0) as u64),
+            label,
+        };
+        if let Err(e) =
+            execute_extract_audio_with_sink(&backend, &ruvic_cfg, audio_req, &progress).await
+        {
             log_event(&format!("CONVERT_FAILED jobId={job_id} err={e}"));
             send_native_message(
                 &out,
@@ -1062,7 +1192,7 @@ fn handle_sync_message<W: Write>(msg: &IncomingMessage, out: &Arc<Mutex<W>>) -> 
         "ping" => {
             let resp = PingResponse {
                 ok: true,
-                version: "2.1.0",
+                version: "2.2.0",
                 engine: "ruvid+ruvic-rust",
                 port: 0,
             };
@@ -1095,7 +1225,30 @@ fn handle_sync_message<W: Write>(msg: &IncomingMessage, out: &Arc<Mutex<W>>) -> 
             send_native_message(out, &json!({"ok": true}));
             true
         }
-        "download" | "probe" => false,
+        "install_extension_update" => {
+            let result = run_extension_update(&msg.version, &msg.url);
+            match result {
+                Ok(()) => send_native_message(
+                    out,
+                    &json!({
+                        "action": "extension_update_result",
+                        "ok": true,
+                        "version": msg.version
+                    }),
+                ),
+                Err(error) => send_native_message(
+                    out,
+                    &json!({
+                        "action": "extension_update_result",
+                        "ok": false,
+                        "version": msg.version,
+                        "error": error
+                    }),
+                ),
+            }
+            true
+        }
+        "download" | "probe" | "playlist" => false,
         other => {
             send_native_message(
                 out,
@@ -1109,6 +1262,67 @@ fn handle_sync_message<W: Write>(msg: &IncomingMessage, out: &Arc<Mutex<W>>) -> 
             true
         }
     }
+}
+
+fn run_extension_update(version: &str, url: &str) -> Result<(), String> {
+    if !is_allowed_extension_update_request(version, url) {
+        return Err("Güncelleme sürümü veya adresi geçersiz.".to_string());
+    }
+
+    let app_dir = std::env::current_exe()
+        .map_err(|e| format!("NativeHost konumu bulunamadı: {e}"))?
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "NativeHost kurulum klasörü bulunamadı.".to_string())?;
+    let script = app_dir.join("Update-Extension.ps1");
+    if !script.is_file() {
+        return Err("Otomatik güncelleme bileşeni kurulu değil; All-in-One kurulumunu bir kez çalıştırın.".to_string());
+    }
+
+    let output = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+        ])
+        .arg(&script)
+        .arg("-Version")
+        .arg(version)
+        .arg("-Url")
+        .arg(url)
+        .output()
+        .map_err(|e| format!("Güncelleme aracı başlatılamadı: {e}"))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if detail.is_empty() {
+            format!("Güncelleme aracı hata kodu {} ile kapandı.", output.status)
+        } else {
+            detail.chars().take(500).collect()
+        })
+    }
+}
+
+fn is_allowed_extension_update_request(version: &str, url: &str) -> bool {
+    let version_parts: Vec<&str> = version.split('.').collect();
+    if version_parts.len() != 3
+        || version_parts.iter().any(|part| {
+            part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit())
+        })
+    {
+        return false;
+    }
+
+    let source_url = "https://github.com/mtahiryilmazz/RuviTools/archive/refs/heads/main.zip";
+    let release_url = format!(
+        "https://github.com/mtahiryilmazz/RuviTools/releases/download/v{version}/RuviTube-v{version}-chrome.zip"
+    );
+    url == source_url || url == release_url
 }
 
 fn process_native_stream_sync<R: Read, W: Write>(
@@ -1141,17 +1355,19 @@ fn process_native_stream_sync<R: Read, W: Write>(
 async fn main() {
     let args: Vec<String> = std::env::args().skip(1).collect();
     if args.iter().any(|a| a == "--version" || a == "-V") {
-        println!("RuviTube NativeHost 2.1.0 (ruvid+ruvic pure-Rust in-process)");
+        println!("RuviTube NativeHost 2.2.0 (ruvid+ruvic pure-Rust in-process)");
         return;
     }
 
-    log_event(&format!("HOST_START v2.1.0 pid={}", std::process::id()));
+    log_event(&format!("HOST_START v2.2.0 pid={}", std::process::id()));
     let stdout_lock = Arc::new(Mutex::new(io::stdout()));
     let stdin = io::stdin();
     let mut handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
     process_native_stream_sync(stdin, stdout_lock, |msg, out_clone| {
         let h = tokio::spawn(async move {
-            if msg.action == "probe" {
+            if msg.action == "playlist" {
+                handle_playlist_job(msg, out_clone).await;
+            } else if msg.action == "probe" {
                 handle_probe_job(msg, out_clone, HostRuntimeConfig::default()).await;
             } else {
                 handle_download_job(msg, out_clone).await;
@@ -1167,6 +1383,30 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extension_update_request_is_limited_to_ruvitools_archives() {
+        assert!(is_allowed_extension_update_request(
+            "2.7.0",
+            "https://github.com/mtahiryilmazz/RuviTools/archive/refs/heads/main.zip"
+        ));
+        assert!(is_allowed_extension_update_request(
+            "2.7.0",
+            "https://github.com/mtahiryilmazz/RuviTools/releases/download/v2.7.0/RuviTube-v2.7.0-chrome.zip"
+        ));
+        assert!(!is_allowed_extension_update_request(
+            "2.7.0",
+            "https://example.com/RuviTube-v2.7.0-chrome.zip"
+        ));
+        assert!(!is_allowed_extension_update_request(
+            "2.7.0",
+            "https://github.com/mtahiryilmazz/RuviTools/releases/download/v2.6.0/RuviTube-v2.6.0-chrome.zip"
+        ));
+        assert!(!is_allowed_extension_update_request(
+            "2.7",
+            "https://github.com/mtahiryilmazz/RuviTools/archive/refs/heads/main.zip"
+        ));
+    }
 
     #[test]
     fn test_validate_clip_normal() {
@@ -1322,6 +1562,12 @@ mod tests {
             "https://music.youtube.com/watch?v=jNQXAC9IVRw"
         ));
         assert!(is_allowed_youtube_url(
+            "https://www.youtube.com/playlist?list=PL1234567890"
+        ));
+        assert!(is_allowed_youtube_url(
+            "https://music.youtube.com/playlist?list=PL1234567890"
+        ));
+        assert!(is_allowed_youtube_url(
             "https://www.youtube.com/shorts/jNQXAC9IVRw"
         ));
         assert!(is_allowed_youtube_url(
@@ -1334,11 +1580,21 @@ mod tests {
             "http://www.youtube.com/watch?v=jNQXAC9IVRw"
         ));
         assert!(!is_allowed_youtube_url("https://evil.example/watch?v=123"));
+        assert!(!is_allowed_youtube_url("https://www.youtube.com/playlist?list=bad value"));
         assert!(!is_allowed_youtube_url(
             "https://www.youtube.com/watch?v=abc def"
         ));
         let over_limit = format!("https://www.youtube.com/watch?v={}", "a".repeat(2040));
         assert!(!is_allowed_youtube_url(&over_limit));
+    }
+
+    #[test]
+    fn test_playlist_url_requires_a_nonempty_playlist_id() {
+        assert!(has_playlist_id("https://www.youtube.com/playlist?list=PL123_abc-"));
+        assert!(has_playlist_id("https://www.youtube.com/watch?v=jNQXAC9IVRw&list=PL123"));
+        assert!(!has_playlist_id("https://www.youtube.com/playlist?list="));
+        assert!(!has_playlist_id("https://www.youtube.com/playlist?notlist=PL123"));
+        assert!(!has_playlist_id("https://www.youtube.com/playlist?list=bad%20id"));
     }
 
     #[test]
@@ -1409,7 +1665,7 @@ mod tests {
         assert_eq!(responses.len(), 3);
 
         assert_eq!(responses[0]["ok"], json!(true));
-        assert_eq!(responses[0]["version"], json!("2.1.0"));
+        assert_eq!(responses[0]["version"], json!("2.2.0"));
         assert_eq!(responses[0]["engine"], json!("ruvid+ruvic-rust"));
 
         assert_eq!(responses[1]["ok"], json!(false));
@@ -1631,6 +1887,7 @@ var ytInitialPlayerResponse = {{
             clip: None,
             channel: String::new(),
             title: String::new(),
+            version: String::new(),
             audio_lang: String::new(),
         };
 

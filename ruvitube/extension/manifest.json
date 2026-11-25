@@ -1,20 +1,24 @@
 {
   "manifest_version": 3,
   "name": "RuviTube",
-  "version": "2.5.0",
-  "description": "RuviTube v2.5 (RuviTools Saf Rust Motoru): 16-part asenkron Range pipelining, HTTP 403 otomatik kurtarma, 4K/8K, otomatik MP3 (320k/192k/VBR) yüksek hızlı indirme.",
+  "version": "2.7.0",
+  "description": "RuviTube v2.7 (RuviTools Saf Rust Motoru): 16 parçalı indirme, MP3 dönüştürme ilerlemesi ve GitHub sürüm denetimi.",
   "default_locale": "tr",
   "minimum_chrome_version": "116",
   "permissions": [
     "nativeMessaging",
     "downloads",
-    "storage"
+    "storage",
+    "alarms",
+    "notifications"
   ],
   "host_permissions": [
     "https://www.youtube.com/*",
     "https://m.youtube.com/*",
     "https://music.youtube.com/*",
-    "https://youtu.be/*"
+    "https://youtu.be/*",
+    "https://api.github.com/*",
+    "https://raw.githubusercontent.com/*"
   ],
   "content_scripts": [
     {

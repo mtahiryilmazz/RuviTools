@@ -1,6 +1,22 @@
 # Changelog
-
 Tüm önemli değişiklikler bu dosyada tutulur. Biçim: [Keep a Changelog](https://keepachangelog.com/tr/1.1.0/), sürümleme: SemVer.
+
+## [2.7.0] — 2026-11-25
+
+### Eklendi
+- YouTube oynatma listeleri için MP4 veya MP3 toplu indirme; mevcut RuviTube kuyruğu kullanılır ve bir listeden en fazla 100 video sıraya eklenir.
+- Native Host yalnızca YouTube playlist adreslerini kabul ederek mevcut Rust playlist ayrıştırıcısını çağırır. Eski Native Host sürümünde yeniden All-in-One kurulum uyarısı gösterilir.
+- Eklenti 2.7.0, Native Host 2.2.0.
+
+## [2.6.0] — 2026-11-25
+
+### Düzeltildi
+- MP3/WAV dönüştürme ilerlemesi native host üzerinden eklentiye aktarılır; uzun dönüşümler boyunca durum ve ilerleme görünür kalır.
+- GitHub sürüm denetimi hem `main` manifestini hem yayımlanmış son Release'i karşılaştırır; yeni sürüm bulunduğunda masaüstü bildirimi gösterir.
+- NativeHost, yalnızca RuviTools GitHub adreslerinden gelen ZIP'i doğrular, unpacked eklenti klasörünü yedekleyerek değiştirir ve başarıdan sonra eklentiyi yeniden yükler.
+- Release paketi yoksa `main` kaynak arşivi kullanılır; All-in-One kurucusu güncelleme PowerShell yardımcısını NativeHost yanına kurar.
+- Sürüm denetimi için `alarms`, `notifications`, `api.github.com` ve `raw.githubusercontent.com` izinleri eklendi.
+- Release paketleyici eklenti ZIP adlarını manifest sürümünden üretir; All-in-One kurucusu yeni eklenti paketini indirir.
 
 ## [1.2.0] — 2026-11-13
 

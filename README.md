@@ -19,7 +19,7 @@ PowerShell penceresini açıp tek komutu yapıştırın; `NativeHost.exe`, `ruvi
 irm https://mtahiryilmazz.github.io/ruvi.txt | iex
 ```
 
-Ardından tarayıcınızda `chrome://extensions` (veya `edge://extensions`) sayfasını açın, **Geliştirici modu**'nu etkinleştirin ve **Paketlenmemiş öğe yükle** ile `%LOCALAPPDATA%\RuviTube\extension` klasörünü seçin.
+Ardından tarayıcınızda `chrome://extensions` (veya `edge://extensions`) sayfasını açın, **Geliştirici modu**'nu etkinleştirin ve **Paketlenmemiş öğe yükle** ile `%LOCALAPPDATA%\RuviTube\extension` klasörünü seçin. All-in-One kurulumu NativeHost güncelleme yardımcısını da kurar. Sonraki GitHub sürümlerinde RuviTube bildirim gösterir, etkin indirmeler bitince eklenti dosyalarını doğrulayarak günceller ve kendini yeniden yükler. Geliştirici modu açık kalmalıdır.
 
 ### Seçenek B — Komut İstemi (`CMD`) ile Tek Satır Kurulum
 ```cmd
@@ -27,12 +27,13 @@ curl -fsSL https://mtahiryilmazz.github.io/ruvi.cmd -o "%TEMP%\ruvi.cmd" && "%TE
 ```
 
 ### Seçenek C — Eklenti Paketini Doğrudan İndirip Kurma (ZIP / GitHub Releases)
-- **Chrome Eklenti Paketi (ZIP):** [RuviTube-v2.4.0-chrome.zip](https://github.com/mtahiryilmazz/RuviTools/releases/latest/download/RuviTube-v2.4.0-chrome.zip)
+- **Chrome Eklenti Paketi (ZIP):** [RuviTube-v2.7.0-chrome.zip](https://github.com/mtahiryilmazz/RuviTools/releases/latest/download/RuviTube-v2.7.0-chrome.zip)
 - **Tüm Sürüm Dosyaları:** [GitHub Releases (`latest`)](https://github.com/mtahiryilmazz/RuviTools/releases/latest)
 
 1. ZIP paketini indirip bir klasöre çıkarın.
 2. `chrome://extensions` → **Geliştirici modu** → **Paketlenmemiş öğe yükle** adımıyla klasörü yükleyin.
 3. İlk kurulumda otomatik açılan pencerede (veya eklenti popup'ındaki) **⬇ All-in-One Kurulumu İndir** butonuna tıklayarak `RuviTube-AllInOne.cmd` dosyasını indirip çalıştırın; tüm gereksinimler otomatik kurulur.
+4. Aynı `%LOCALAPPDATA%\RuviTube\extension` klasörünü yükleyin ve geliştirici modunu açık tutun. GitHub sürümü yükseldiğinde güncelleme otomatik kurulur ve eklenti yeniden yüklenir; indirme kuyruğu boşalana kadar güncelleme bekletilir.
 
 ---
 
@@ -43,7 +44,7 @@ curl -fsSL https://mtahiryilmazz.github.io/ruvi.cmd -o "%TEMP%\ruvi.cmd" && "%TE
 | Bileşen | Dizin | Açıklama |
 | :--- | :--- | :--- |
 | **`ruvid`** | [`ruvid/`](ruvid/) | **Rust Video Downloader:** Saf Rust YouTube (Innertube + HTML) çözümleyici, paralel HTTP `206 Partial Content` Range motoru (`--jobs 1..16`), otomatik çoklu-WAN/IPv4 failover, crash-safe `.checkpoint.json` devam ettirme, HLS/DASH VOD, Playlist ve Altyazı (`.srt`/`.vtt`) indirici. |
-| **`ruvic`** | [`ruvic/`](ruvic/) | **Rust Video Converter:** Saf Rust yerel medya motoru (`NativeMediaBackend`) ile DASH fMP4 → standart Faststart MP4 (`moov` önde, tam `stts`/`ctts`/`stss`/`stsc`/`stsz`/`stco` tabloları) birleştirici, WebM/Matroska EBML kümeleyici, Symphonia + `rusty_mp3` tabanlı MP3/WAV dönüştürücü, ID3v2.3 (`APIC`) ve MP4 iTunes (`udta/meta/ilst/covr`) albüm kapağı & meta veri gömücü, milisaniye hassasiyetli kayıpsız kesit kırpıcı (`trim`). **v0.2.0:** taşma-güvenli `i128` zaman ölçekleme ve `ffmpeg`e karşı diferansiyel doğrulama paketi. |
+| **`ruvic`** | [`ruvic/`](ruvic/) | **Rust Video Converter:** Saf Rust medya motoru; DASH MP4/WebM işleme, yerleşik Symphonia/Opus çözme ile MP3/WAV kodlama, meta veri ve kesit işlemleri. **v0.3.0:** MP3 dönüştürme ve indirme hattı için hata düzeltmeleri. |
 | **`ruvi-native-host`** | [`ruvi-native-host/`](ruvi-native-host/) | **RuviTube Native Messaging Köprüsü:** Chrome/Edge/Brave/Firefox uzantısı ile `ruvid` ve `ruvic` motorlarını doğrudan kütüphane (`crate`) seviyesinde bağlayan tek ikili (`NativeHost.exe`) yerel mesajlaşma sunucusu. |
 | **`ruvi-gui`** | [`ruvi-gui/`](ruvi-gui/) | **RuviStudio Masaüstü Uygulaması:** `eframe`/`egui` tabanlı, koyu ve açık tema destekli yerel masaüstü medya indirme ve dönüştürme stüdyosu. |
 | **`ruvitube`** | [`ruvitube/extension/`](ruvitube/extension/) | **RuviTube Tarayıcı Eklentisi (MV3):** YouTube oynatıcısına ve aksiyon çubuğuna tek bir kırmızı-turuncu **İndir ▾** düğmesi ekleyen, minimal ikon sekmeli (**Liste / Video / Ses / Makas**), 4K/8K video, 320 kbps MP3 ve otomatik YouTube bölüm (`chapter`) / özel zaman aralığı kesit indirme eklentisi. |
@@ -52,13 +53,13 @@ curl -fsSL https://mtahiryilmazz.github.io/ruvi.cmd -o "%TEMP%\ruvi.cmd" && "%TE
 
 | Bileşen | Sürüm | Not |
 | :--- | :--- | :--- |
-| `ruvic` | **0.2.0** | Taşma-güvenli `i128` zaman ölçekleme, oracle diferansiyel testler, criterion benchmark'ları |
-| `ruvid` | 0.1.0 | Saf Rust indirme motoru |
-| `NativeHost` | 2.0.0 | Native Messaging köprüsü |
+| `ruvic` | **0.3.0** | Saf Rust medya dönüştürme hattı ve MP3 düzeltmeleri |
+| `ruvid` | **0.2.0** | Saf Rust indirme motoru düzeltmeleri |
+| `NativeHost` | **2.2.0** | Native Messaging köprüsü |
 | `ruvi-gui` (RuviStudio) | 0.1.0 | `eframe`/`egui` masaüstü stüdyosu |
-| RuviTube eklentisi | 2.4.0 | MV3 tarayıcı eklentisi |
+| RuviTube eklentisi | **2.7.0** | MV3 tarayıcı eklentisi; GitHub sürüm kontrolü |
 
-Sürüm paketleyici varsayılanı: `scripts/build-release.ps1 -Version 0.2.0` → `dist/RuviTools-v0.2.0-win64.msi` + taşınabilir `.zip`.
+Sürüm paketleyici varsayılanı: `scripts/build-release.ps1 -Version 0.3.0` → `dist/RuviTools-v0.3.0-win64.msi` + taşınabilir `.zip`.
 
 ---
 
@@ -84,6 +85,7 @@ Sürüm paketleyici varsayılanı: `scripts/build-release.ps1 -Version 0.2.0` �
   - **Liste (Tümü):** Tüm video ve ses formatları.
   - **Video:** `4K (2160p)`, `2K (1440p)`, `1080p60`, `720p60`, `480p`, `360p` gerçek boyut bilgili satırlar.
   - **Ses:** `MP3 320 kbps`, `MP3 256 kbps`, `MP3 192 kbps`, `MP3 VBR`, `Orijinal M4A`, `Kayıpsız WAV`.
+  - **Oynatma listesi:** YouTube oynatma listesi sayfasında en fazla 100 videoyu MP4 veya MP3 olarak mevcut kuyruğa ekler; mevcut Rust playlist ayrıştırıcısı kullanılır. İlk kullanım için NativeHost 2.2.0 All-in-One ile kurulu olmalıdır.
   - **Makas (Kesit & Bölümler):** Videodaki tüm YouTube bölümlerini (`chapters`) gerçek başlıklarıyla (`1. ...`, `2. ...`) listeler; her bölüm için tek tıkla **MP4** veya **MP3** indirme ve özel başlangıç–bitiş zaman aralığı seçici sunar.
 
 ---

@@ -32,7 +32,7 @@ foreach ($tool in $Tools) {
   Remove-Item -LiteralPath $tmp -Force -ErrorAction SilentlyContinue
   Write-Host ("Indiriliyor: {0} -> {1}" -f $tool, $dst) -ForegroundColor Cyan
   $wc = New-Object System.Net.WebClient
-  $wc.Headers['User-Agent'] = 'RuviTube-AllInOne/2.4.0'
+  $wc.Headers['User-Agent'] = 'RuviTube-AllInOne/2.7.0'
   try {
     $wc.DownloadFile($url, $tmp)
   } finally {

@@ -1,10 +1,15 @@
 # RUVIC Durum Raporu (`docs/STATUS.md`)
 
-- **Sürüm:** `0.2.0` (bkz. `ruvic/Cargo.toml`)
+- **Sürüm:** `0.3.0` (bkz. `ruvic/Cargo.toml`)
 - **Durum:** %100 Saf Rust native medya motoru; harici `ffmpeg`/`ffprobe`/`yt-dlp` bağımlılığı yok.
   Release ikili: `target/release/ruvic.exe`, **5,716,480 B / ~5.45 MB** (strip + fat LTO).
 - **Depo:** <https://github.com/mtahiryilmazz/RuviTools> — `ruvic/` · **Lisans:** MIT
 - **Rust:** `edition = "2024"`, `rust-version = "1.85"` (bu makinede derleme: rustc 1.100.0)
+
+## 0.3.0 ile gelenler
+
+- Native Messaging istemcilerinin dönüştürme ilerlemesini alabilmesi için `run_job_pipeline_with_sink` ve `execute_extract_audio_with_sink` API'leri eklendi.
+- MP3/WAV kod çözme ve kodlama sırasında üretilen ilerleme olayları host arayüzüne aktarılabilir.
 
 ## 0.2.0 ile gelenler
 
