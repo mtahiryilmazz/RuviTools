@@ -13,7 +13,7 @@ const SETTINGS_KEY = 'ruvitube.settings';
 const MAX_ACTIVE = 2;
 const JOB_TTL_MS = 6 * 60 * 60 * 1000;
 
-chrome.storage.session.set({ 'ruvitube.bgVersion': 'sw-2.5.0-ruvi' }).catch(() => {});
+chrome.storage.session.set({ 'ruvitube.bgVersion': 'sw-2.6.0-ruvi' }).catch(() => {});
 
 const VIDEO_QUALITIES = [
   'best', 'h264', 'mp4-h264', '4320p60', '4320p', '2160p60', '2160p',
@@ -243,6 +243,7 @@ async function finishJob(jobId, patch) {
   await broadcast(job);
   await promoteQueued();
   if (job.ok !== false && job.filePath) await afterDownload(job);
+  await installPendingUpdateWhenIdle();
 }
 
 async function afterDownload(job) {
@@ -708,36 +709,200 @@ chrome.runtime.onInstalled.addListener(details => {
   }).catch(() => {});
 });
 
+function compareVersions(left, right) {
+  const parse = value => {
+    const match = String(value || '').trim().replace(/^v/i, '').match(/^(\d+)\.(\d+)\.(\d+)(?:[-+].*)?$/);
+    return match ? match.slice(1, 4).map(Number) : null;
+  };
+  const a = parse(left);
+  const b = parse(right);
+  if (!a || !b) return 0;
+  for (let i = 0; i < 3; i += 1) {
+    if (a[i] !== b[i]) return a[i] > b[i] ? 1 : -1;
+  }
+  return 0;
+}
+
+const UPDATE_NOTIFICATION_ID = 'ruvitube-update-available';
+
+async function openUpdateDownload() {
+  const stored = await chrome.storage.local.get('ruvitube.updateInfo');
+  const updateInfo = stored && stored['ruvitube.updateInfo'];
+  if (updateInfo?.downloadUrl) chrome.tabs.create({ url: updateInfo.downloadUrl });
+}
+
+chrome.notifications.onClicked.addListener(notificationId => {
+  if (notificationId === UPDATE_NOTIFICATION_ID) openUpdateDownload().catch(() => {});
+});
+chrome.notifications.onButtonClicked.addListener((notificationId, buttonIndex) => {
+  if (notificationId === UPDATE_NOTIFICATION_ID && buttonIndex === 0) {
+    openUpdateDownload().catch(() => {});
+  }
+});
+
+function startAutomaticExtensionUpdate(updateInfo) {
+  return getJobs().then(jobs => {
+    if (activeCount(jobs) > 0) return;
+    return chrome.storage.local.get('ruvitube.autoUpdateAttemptedVersion').then(stored => {
+    if (stored['ruvitube.autoUpdateAttemptedVersion'] === updateInfo.version) return;
+    return chrome.storage.local.set({ 'ruvitube.autoUpdateAttemptedVersion': updateInfo.version }).then(() => {
+      let port;
+      try {
+        port = chrome.runtime.connectNative(HOST);
+      } catch (error) {
+        chrome.storage.local.remove('ruvitube.autoUpdateAttemptedVersion').catch(() => {});
+        chrome.storage.local.set({ 'ruvitube.updateInstallError': (error && error.message) || 'NativeHost bağlantısı kurulamadı.' }).catch(() => {});
+        chrome.notifications.create('ruvitube-update-failed', {
+          type: 'basic', iconUrl: chrome.runtime.getURL('icon128.png'),
+          title: 'RuviTube güncellemesi kurulamadı',
+          message: (error && error.message) || 'NativeHost bağlantısı kurulamadı; All-in-One kurulumunu bir kez çalıştırın.'
+        });
+        return;
+      }
+
+      let settled = false;
+      const timer = setTimeout(() => finish(false, 'Güncelleme zaman aşımına uğradı.'), 600000);
+      const finish = (ok, detail) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        try { port.disconnect(); } catch (_) {}
+        if (ok) {
+          chrome.storage.local.remove('ruvitube.updateInfo').catch(() => {});
+          chrome.notifications.create('ruvitube-update-installed', {
+            type: 'basic', iconUrl: chrome.runtime.getURL('icon128.png'),
+            title: `RuviTube v${updateInfo.version} kuruldu`,
+            message: 'Eklenti yeniden yükleniyor.'
+          });
+          setTimeout(() => chrome.runtime.reload(), 500);
+          return;
+        }
+        chrome.storage.local.remove('ruvitube.autoUpdateAttemptedVersion').catch(() => {});
+        chrome.storage.local.set({ 'ruvitube.updateInstallError': String(detail || 'Güncelleme kurulamadı.') }).catch(() => {});
+        chrome.notifications.create('ruvitube-update-failed', {
+          type: 'basic', iconUrl: chrome.runtime.getURL('icon128.png'),
+          title: 'RuviTube güncellemesi kurulamadı',
+          message: String(detail || 'Güncelleme aracı hata verdi.').slice(0, 240)
+        });
+      };
+
+      port.onMessage.addListener(msg => {
+        if (!msg || msg.action !== 'extension_update_result') return;
+        finish(msg.ok === true, msg.error || 'Güncelleme tamamlanamadı.');
+      });
+      port.onDisconnect.addListener(() => {
+        if (settled) return;
+        const error = chrome.runtime.lastError;
+        finish(false, (error && error.message) || 'NativeHost güncelleme sırasında kapandı.');
+      });
+      try {
+        port.postMessage({
+          action: 'install_extension_update',
+          version: updateInfo.version,
+          url: updateInfo.downloadUrl
+        });
+      } catch (error) {
+        finish(false, (error && error.message) || 'Güncelleme isteği gönderilemedi.');
+      }
+    });
+    });
+  });
+}
+
+async function installPendingUpdateWhenIdle() {
+  const jobs = await getJobs();
+  if (activeCount(jobs) > 0) return;
+  const stored = await chrome.storage.local.get('ruvitube.updateInfo');
+  if (stored['ruvitube.updateInfo']) {
+    startAutomaticExtensionUpdate(stored['ruvitube.updateInfo']).catch(() => {});
+  }
+}
+
 async function checkForExtensionUpdates() {
   try {
-    const res = await fetch('https://raw.githubusercontent.com/mtahiryilmazz/RuviTools/main/ruvitube/extension/manifest.json');
-    if (res.ok) {
-      const remote = await res.json();
-      const remoteVersion = remote.version;
-      const localVersion = chrome.runtime.getManifest().version;
-      if (remoteVersion && remoteVersion !== localVersion) {
-        await chrome.storage.local.set({
-          'ruvitube.updateInfo': {
-            version: remoteVersion,
-            downloadUrl: 'https://github.com/mtahiryilmazz/RuviTools/releases/latest'
-          }
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10000);
+    let manifestRes;
+    let releaseRes;
+    try {
+      [manifestRes, releaseRes] = await Promise.all([
+        fetch('https://raw.githubusercontent.com/mtahiryilmazz/RuviTools/main/ruvitube/extension/manifest.json', {
+          cache: 'no-store', signal: controller.signal
+        }),
+        fetch('https://api.github.com/repos/mtahiryilmazz/RuviTools/releases/latest', {
+          cache: 'no-store', signal: controller.signal,
+          headers: { Accept: 'application/vnd.github+json' }
+        }).catch(() => null)
+      ]);
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (!manifestRes.ok) throw new Error('Güncelleme sunucusu HTTP ' + manifestRes.status);
+    const sourceManifest = await manifestRes.json();
+    const release = releaseRes && releaseRes.ok ? await releaseRes.json() : null;
+    const sourceVersion = String(sourceManifest.version || '');
+    const releaseVersion = String(release?.tag_name || '').replace(/^v/i, '');
+    const remoteVersion = compareVersions(releaseVersion, sourceVersion) > 0
+      ? releaseVersion
+      : sourceVersion;
+    const localVersion = chrome.runtime.getManifest().version;
+    const hasUpdate = compareVersions(remoteVersion, localVersion) > 0;
+    const updateKey = 'ruvitube.updateInfo';
+    if (hasUpdate) {
+      const extensionAsset = releaseVersion === remoteVersion && Array.isArray(release?.assets)
+        ? release.assets.find(asset => asset.name === `RuviTube-v${remoteVersion}-chrome.zip`)
+        : null;
+      const hasReleasePackage = Boolean(extensionAsset?.browser_download_url);
+      const updateInfo = {
+        version: remoteVersion,
+        checkedAt: Date.now(),
+        sourceOnly: !hasReleasePackage && remoteVersion === sourceVersion,
+        downloadUrl: hasReleasePackage
+          ? extensionAsset.browser_download_url
+          : (remoteVersion === sourceVersion
+            ? 'https://github.com/mtahiryilmazz/RuviTools/archive/refs/heads/main.zip'
+            : (release?.html_url || 'https://github.com/mtahiryilmazz/RuviTools/releases/latest'))
+      };
+      await chrome.storage.local.set({
+        [updateKey]: updateInfo
+      });
+      const notified = await chrome.storage.local.get('ruvitube.notifiedUpdateVersion');
+      if (notified['ruvitube.notifiedUpdateVersion'] !== remoteVersion
+          && chrome.notifications && typeof chrome.notifications.create === 'function') {
+        chrome.notifications.create(UPDATE_NOTIFICATION_ID, {
+          type: 'basic',
+          iconUrl: chrome.runtime.getURL('icon128.png'),
+          title: `RuviTube v${remoteVersion} hazır`,
+          message: 'GitHub’da yeni sürüm bulundu. RuviTube güncellemeyi kurup eklentiyi yeniden yükleyecek.',
+          buttons: [{ title: 'Güncelleme paketini aç' }],
+          priority: 2
         });
-        if (chrome.action && typeof chrome.action.setBadgeText === 'function') {
-          chrome.action.setBadgeText({ text: 'UP' });
-          chrome.action.setBadgeBackgroundColor({ color: '#2563eb' });
-        }
+        await chrome.storage.local.set({ 'ruvitube.notifiedUpdateVersion': remoteVersion });
+      }
+      await chrome.storage.local.remove('ruvitube.updateInstallError');
+      startAutomaticExtensionUpdate(updateInfo).catch(() => {});
+      if (chrome.action && typeof chrome.action.setBadgeText === 'function') {
+        await chrome.action.setBadgeText({ text: 'UP' });
+        await chrome.action.setBadgeBackgroundColor({ color: '#2563eb' });
+      }
+    } else {
+      await chrome.storage.local.remove(updateKey);
+      if (chrome.action && typeof chrome.action.setBadgeText === 'function') {
+        await chrome.action.setBadgeText({ text: '' });
       }
     }
+    return { ok: true, hasUpdate, version: remoteVersion };
   } catch (_) {}
+  return { ok: false };
 }
 
 if (chrome.alarms && typeof chrome.alarms.create === 'function') {
-  chrome.alarms.create('checkUpdatesAlarm', { periodInMinutes: 120 });
+  chrome.alarms.create('checkUpdatesAlarm', { delayInMinutes: 1, periodInMinutes: 120 });
   chrome.alarms.onAlarm.addListener(alarm => {
-    if (alarm.name === 'checkUpdatesAlarm') {
-      checkForExtensionUpdates();
-    }
+    if (alarm.name === 'checkUpdatesAlarm') checkForExtensionUpdates();
   });
 }
+chrome.runtime.onStartup.addListener(() => checkForExtensionUpdates());
+chrome.runtime.onInstalled.addListener(() => checkForExtensionUpdates());
 checkForExtensionUpdates();
 

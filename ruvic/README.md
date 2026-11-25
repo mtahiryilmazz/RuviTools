@@ -8,7 +8,7 @@
 veya herhangi bir C kütüphanesi **çağırmadan** analiz, remux, DASH birleştirme, kesit kırpma,
 ses dönüştürme, meta veri gömme ve toplu işlem yapan tek ikili bir CLI + Rust kütüphanesidir.
 
-- **Sürüm:** `0.2.0`
+- **Sürüm:** `0.3.0`
 - **Depo:** <https://github.com/mtahiryilmazz/RuviTools> (`ruvic/`)
 - **Lisans:** MIT — temiz-oda (clean-room) tasarım, hiçbir GPL/LGPL kod içermez
 - **İkili boyut:** ~3.7 MB (strip + LTO), çalışma zamanı bağımlılığı yok

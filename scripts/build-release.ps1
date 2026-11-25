@@ -3,7 +3,7 @@
 
 [CmdletBinding()]
 param(
-  [string]$Version = '0.2.0',
+  [string]$Version = '0.3.0',
   [switch]$WithMimalloc,
   [switch]$SkipBuild,
   [switch]$SkipMsi
@@ -17,6 +17,7 @@ $BinStage = Join-Path $StagingDir 'bin'
 $ExtStage = Join-Path $StagingDir 'extension'
 $PortableStage = Join-Path $StagingDir 'portable'
 $RuviTubeBin = Join-Path $RepoRoot 'ruvitube\bin'
+$ExtensionVersion = (Get-Content -LiteralPath (Join-Path $RepoRoot 'ruvitube\extension\manifest.json') -Raw | ConvertFrom-Json).version
 
 $Crates = @(
   @{ Name = 'ruvid'; Bin = 'ruvid.exe' },
@@ -99,7 +100,7 @@ $chromeExtStage = Join-Path $StagingDir 'ext-chrome'
 New-Item -ItemType Directory -Force -Path $chromeExtStage | Out-Null
 Copy-Item -Path (Join-Path $ExtStage '*') -Destination $chromeExtStage -Recurse -Force
 Remove-Item -LiteralPath (Join-Path $chromeExtStage 'manifest.firefox.json') -Force -ErrorAction SilentlyContinue
-$chromeZip = Join-Path $DistDir 'RuviTube-v2.0.0-chrome.zip'
+$chromeZip = Join-Path $DistDir "RuviTube-v$ExtensionVersion-chrome.zip"
 if (Test-Path -LiteralPath $chromeZip) { Remove-Item -LiteralPath $chromeZip -Force }
 Compress-Archive -Path (Join-Path $chromeExtStage '*') -DestinationPath $chromeZip -CompressionLevel Optimal
 
@@ -112,7 +113,7 @@ if (-not (Test-Path -LiteralPath $ffManifestSrc -PathType Leaf)) {
   throw "Missing manifest.firefox.json in $firefoxExtStage"
 }
 Move-Item -LiteralPath $ffManifestSrc -Destination (Join-Path $firefoxExtStage 'manifest.json') -Force
-$firefoxZip = Join-Path $DistDir 'RuviTube-v2.0.0-firefox.zip'
+$firefoxZip = Join-Path $DistDir "RuviTube-v$ExtensionVersion-firefox.zip"
 if (Test-Path -LiteralPath $firefoxZip) { Remove-Item -LiteralPath $firefoxZip -Force }
 Compress-Archive -Path (Join-Path $firefoxExtStage '*') -DestinationPath $firefoxZip -CompressionLevel Optimal
 

@@ -8,13 +8,14 @@ use std::time::{Instant, SystemTime, UNIX_EPOCH};
 #[global_allocator]
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
+use ruvic::backend::{MediaBackend, ProgressSink, ProgressUpdate};
 use ruvic::backend::native::NativeMediaBackend;
 use ruvic::backend::native::audio_transcode::{
     parse_smart_title_metadata, write_id3v23_to_mp3_file,
 };
 use ruvic::backend::native::dual_mux::inject_fmp4_itunes_metadata_file;
 use ruvic::config::RuvicConfig;
-use ruvic::operations::extract_audio::{ExtractAudioRequest, execute_extract_audio};
+use ruvic::operations::extract_audio::{ExtractAudioRequest, execute_extract_audio_with_sink};
 use ruvic::operations::remux::{RemuxRequest, execute_remux};
 use ruvic::operations::trim::{TrimRequest, execute_trim};
 use ruvid::config::RuvidConfig;
@@ -32,6 +33,54 @@ const MAX_LOG_BYTES: u64 = 2 * 1024 * 1024;
 const DEFAULT_JOBS: usize = 4;
 const MIN_JOBS: usize = 1;
 const MAX_JOBS: usize = 16;
+
+struct NativeProgressSink<W> {
+    out: Arc<Mutex<W>>,
+    job_id: String,
+    total_duration_us: Option<u64>,
+    label: &'static str,
+}
+
+impl<W: Write + Send + 'static> ProgressSink for NativeProgressSink<W> {
+    fn on_progress(&self, update: ProgressUpdate) {
+        let elapsed_us = update.out_time_us.unwrap_or(0);
+        let total_us = self.total_duration_us.unwrap_or(0);
+        let percent = if update.finished {
+            98
+        } else if total_us > 0 {
+            (88 + ((elapsed_us.min(total_us) as f64 / total_us as f64) * 10.0).floor() as u64)
+                .min(97)
+        } else {
+            89
+        };
+        let status = if total_us > 0 {
+            format!(
+                "{}: {} / {}",
+                self.label,
+                format_media_time(elapsed_us),
+                format_media_time(total_us)
+            )
+        } else if elapsed_us > 0 {
+            format!("{}: {}", self.label, format_media_time(elapsed_us))
+        } else {
+            format!("{}...", self.label)
+        };
+        send_native_message(
+            &self.out,
+            &json!({
+                "jobId": self.job_id,
+                "percent": percent,
+                "status": status,
+                "speed": update.speed.clone().unwrap_or_default()
+            }),
+        );
+    }
+}
+
+fn format_media_time(microseconds: u64) -> String {
+    let seconds = microseconds / 1_000_000;
+    format!("{:02}:{:02}", seconds / 60, seconds % 60)
+}
 
 #[derive(Debug, Clone, Deserialize)]
 struct ClipSpec {
@@ -65,6 +114,8 @@ struct IncomingMessage {
     channel: String,
     #[serde(default)]
     title: String,
+    #[serde(default)]
+    version: String,
     #[serde(default, rename = "audioLang")]
     audio_lang: String,
 }
@@ -925,7 +976,23 @@ async fn handle_download_job_with_config<W: Write + Send + 'static>(
             },
             duration: if is_mp3 || is_wav { clip_dur } else { None },
         };
-        if let Err(e) = execute_extract_audio(&backend, &ruvic_cfg, audio_req, false).await {
+        let source_duration = backend
+            .probe(&working_path)
+            .await
+            .ok()
+            .and_then(|info| info.container.duration_seconds);
+        let conversion_duration = clip_dur.or(source_duration);
+        let progress = NativeProgressSink {
+            out: Arc::clone(&out),
+            job_id: job_id.clone(),
+            total_duration_us: conversion_duration
+                .filter(|duration| duration.is_finite() && *duration > 0.0)
+                .map(|duration| (duration * 1_000_000.0) as u64),
+            label,
+        };
+        if let Err(e) =
+            execute_extract_audio_with_sink(&backend, &ruvic_cfg, audio_req, &progress).await
+        {
             log_event(&format!("CONVERT_FAILED jobId={job_id} err={e}"));
             send_native_message(
                 &out,
@@ -1095,6 +1162,29 @@ fn handle_sync_message<W: Write>(msg: &IncomingMessage, out: &Arc<Mutex<W>>) -> 
             send_native_message(out, &json!({"ok": true}));
             true
         }
+        "install_extension_update" => {
+            let result = run_extension_update(&msg.version, &msg.url);
+            match result {
+                Ok(()) => send_native_message(
+                    out,
+                    &json!({
+                        "action": "extension_update_result",
+                        "ok": true,
+                        "version": msg.version
+                    }),
+                ),
+                Err(error) => send_native_message(
+                    out,
+                    &json!({
+                        "action": "extension_update_result",
+                        "ok": false,
+                        "version": msg.version,
+                        "error": error
+                    }),
+                ),
+            }
+            true
+        }
         "download" | "probe" => false,
         other => {
             send_native_message(
@@ -1109,6 +1199,67 @@ fn handle_sync_message<W: Write>(msg: &IncomingMessage, out: &Arc<Mutex<W>>) -> 
             true
         }
     }
+}
+
+fn run_extension_update(version: &str, url: &str) -> Result<(), String> {
+    if !is_allowed_extension_update_request(version, url) {
+        return Err("Güncelleme sürümü veya adresi geçersiz.".to_string());
+    }
+
+    let app_dir = std::env::current_exe()
+        .map_err(|e| format!("NativeHost konumu bulunamadı: {e}"))?
+        .parent()
+        .map(Path::to_path_buf)
+        .ok_or_else(|| "NativeHost kurulum klasörü bulunamadı.".to_string())?;
+    let script = app_dir.join("Update-Extension.ps1");
+    if !script.is_file() {
+        return Err("Otomatik güncelleme bileşeni kurulu değil; All-in-One kurulumunu bir kez çalıştırın.".to_string());
+    }
+
+    let output = std::process::Command::new("powershell.exe")
+        .args([
+            "-NoLogo",
+            "-NoProfile",
+            "-NonInteractive",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-File",
+        ])
+        .arg(&script)
+        .arg("-Version")
+        .arg(version)
+        .arg("-Url")
+        .arg(url)
+        .output()
+        .map_err(|e| format!("Güncelleme aracı başlatılamadı: {e}"))?;
+
+    if output.status.success() {
+        Ok(())
+    } else {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        Err(if detail.is_empty() {
+            format!("Güncelleme aracı hata kodu {} ile kapandı.", output.status)
+        } else {
+            detail.chars().take(500).collect()
+        })
+    }
+}
+
+fn is_allowed_extension_update_request(version: &str, url: &str) -> bool {
+    let version_parts: Vec<&str> = version.split('.').collect();
+    if version_parts.len() != 3
+        || version_parts.iter().any(|part| {
+            part.is_empty() || !part.bytes().all(|byte| byte.is_ascii_digit())
+        })
+    {
+        return false;
+    }
+
+    let source_url = "https://github.com/mtahiryilmazz/RuviTools/archive/refs/heads/main.zip";
+    let release_url = format!(
+        "https://github.com/mtahiryilmazz/RuviTools/releases/download/v{version}/RuviTube-v{version}-chrome.zip"
+    );
+    url == source_url || url == release_url
 }
 
 fn process_native_stream_sync<R: Read, W: Write>(
@@ -1167,6 +1318,30 @@ async fn main() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn extension_update_request_is_limited_to_ruvitools_archives() {
+        assert!(is_allowed_extension_update_request(
+            "2.7.0",
+            "https://github.com/mtahiryilmazz/RuviTools/archive/refs/heads/main.zip"
+        ));
+        assert!(is_allowed_extension_update_request(
+            "2.7.0",
+            "https://github.com/mtahiryilmazz/RuviTools/releases/download/v2.7.0/RuviTube-v2.7.0-chrome.zip"
+        ));
+        assert!(!is_allowed_extension_update_request(
+            "2.7.0",
+            "https://example.com/RuviTube-v2.7.0-chrome.zip"
+        ));
+        assert!(!is_allowed_extension_update_request(
+            "2.7.0",
+            "https://github.com/mtahiryilmazz/RuviTools/releases/download/v2.6.0/RuviTube-v2.6.0-chrome.zip"
+        ));
+        assert!(!is_allowed_extension_update_request(
+            "2.7",
+            "https://github.com/mtahiryilmazz/RuviTools/archive/refs/heads/main.zip"
+        ));
+    }
 
     #[test]
     fn test_validate_clip_normal() {
@@ -1631,6 +1806,7 @@ var ytInitialPlayerResponse = {{
             clip: None,
             channel: String::new(),
             title: String::new(),
+            version: String::new(),
             audio_lang: String::new(),
         };
 

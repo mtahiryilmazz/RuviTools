@@ -246,16 +246,23 @@ $('openFolder').addEventListener('click', () => {
 
 async function initUpdateBanner() {
   try {
-    const stored = await chrome.storage.local.get('ruvitube.updateInfo');
+    const stored = await chrome.storage.local.get(['ruvitube.updateInfo', 'ruvitube.updateInstallError']);
     const updateInfo = stored && stored['ruvitube.updateInfo'];
     if (updateInfo && updateInfo.version) {
       const banner = $('updateBanner');
       const versionText = $('updateVersionText');
+      const instructions = $('updateInstructions');
       const btn = $('btnDownloadUpdate');
       if (banner && versionText) {
         versionText.textContent = 'v' + updateInfo.version;
         banner.hidden = false;
+        if (instructions && stored['ruvitube.updateInstallError']) {
+          instructions.textContent = 'Otomatik kurulum tamamlanamadı: ' + stored['ruvitube.updateInstallError'] + ' All-in-One kurulumunu bir kez çalıştırıp NativeHost güncelleyicisini kurun.';
+        } else if (instructions) {
+          instructions.textContent = 'Yeni sürüm bulundu. RuviTube güncellemeyi NativeHost ile kurup eklentiyi yeniden yükleyecek.';
+        }
         if (btn) {
+          if (updateInfo.sourceOnly) btn.textContent = '⬇ GitHub kaynak arşivini indir';
           btn.addEventListener('click', () => {
             chrome.tabs.create({ url: updateInfo.downloadUrl || 'https://github.com/mtahiryilmazz/RuviTools/releases/latest' });
           });

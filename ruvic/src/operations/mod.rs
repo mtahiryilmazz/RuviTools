@@ -22,6 +22,23 @@ pub async fn run_job_pipeline(
     job: ConversionJob,
     show_progress: bool,
 ) -> RuviResult<OperationResult> {
+    run_job_pipeline_internal(backend, job, show_progress, None).await
+}
+
+pub async fn run_job_pipeline_with_sink(
+    backend: &dyn MediaBackend,
+    job: ConversionJob,
+    sink: &dyn crate::backend::ProgressSink,
+) -> RuviResult<OperationResult> {
+    run_job_pipeline_internal(backend, job, false, Some(sink)).await
+}
+
+async fn run_job_pipeline_internal(
+    backend: &dyn MediaBackend,
+    job: ConversionJob,
+    show_progress: bool,
+    progress_sink: Option<&dyn crate::backend::ProgressSink>,
+) -> RuviResult<OperationResult> {
     validate_io_paths(&job.input, &job.output, job.overwrite)?;
 
     let probe_svc = ProbeService::new(backend);
@@ -43,15 +60,16 @@ pub async fn run_job_pipeline(
 
     let mut guard = TempOutputGuard::new(temp_path);
     let label = format!("{:?}", plan.operation).to_lowercase();
-    let sink = CliProgressSink::new(
-        show_progress,
+    let cli_sink = CliProgressSink::new(
+        show_progress && progress_sink.is_none(),
         source_info.container.duration_seconds,
         &label,
     );
+    let sink = progress_sink.unwrap_or(&cli_sink);
     let report = backend
-        .execute(&plan, &sink, CancellationToken::new())
+        .execute(&plan, sink, CancellationToken::new())
         .await?;
-    sink.finish();
+    cli_sink.finish();
 
     let (output_size_bytes, output_probe) = commit_temp_output(
         backend,

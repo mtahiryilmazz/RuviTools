@@ -788,7 +788,7 @@ checksum = "c1741bfe603a47c4bb263f00d4f8d65a97ae4a970a26287f1c38ff00aa9a52ae"
 
 [[package]]
 name = "ruvic"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "assert_cmd",
  "async-trait",

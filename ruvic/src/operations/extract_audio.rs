@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use crate::backend::MediaBackend;
+use crate::backend::{MediaBackend, ProgressSink};
 use crate::config::RuvicConfig;
 use crate::domain::conversion_job::{ConversionJob, OperationKind, OperationResult};
 use crate::domain::output_spec::{HwAccelMode, OverwritePolicy, SubtitleMode};
@@ -27,6 +27,21 @@ pub async fn execute_extract_audio(
     req: ExtractAudioRequest,
     show_progress: bool,
 ) -> RuviResult<OperationResult> {
+    let job = build_job(config, req)?;
+    run_job_pipeline(backend, job, show_progress).await
+}
+
+pub async fn execute_extract_audio_with_sink(
+    backend: &dyn MediaBackend,
+    config: &RuvicConfig,
+    req: ExtractAudioRequest,
+    progress: &dyn ProgressSink,
+) -> RuviResult<OperationResult> {
+    let job = build_job(config, req)?;
+    crate::operations::run_job_pipeline_with_sink(backend, job, progress).await
+}
+
+fn build_job(config: &RuvicConfig, req: ExtractAudioRequest) -> RuviResult<ConversionJob> {
     let container = match req.to {
         Some(ref fmt) => ContainerFormat::from_name(fmt)?,
         None => ContainerFormat::from_path(&req.output)?,
@@ -42,7 +57,7 @@ pub async fn execute_extract_audio(
         OverwritePolicy::Reject
     };
 
-    let job = ConversionJob {
+    Ok(ConversionJob {
         kind: OperationKind::ExtractAudio,
         input: req.input,
         secondary_input: None,
@@ -67,7 +82,5 @@ pub async fn execute_extract_audio(
         duration_seconds: req.duration,
         thumbnail_at: None,
         reencode: !req.copy,
-    };
-
-    run_job_pipeline(backend, job, show_progress).await
+    })
 }
