@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "RuviTube",
-  "version": "2.5.0",
+  "version": "2.5.1",
   "description": "RuviTube v2.5 (RuviTools Saf Rust Motoru): 16-part asenkron Range pipelining, HTTP 403 otomatik kurtarma, 4K/8K, otomatik MP3 (320k/192k/VBR) yüksek hızlı indirme.",
   "default_locale": "tr",
   "minimum_chrome_version": "116",
