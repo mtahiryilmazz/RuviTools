@@ -1,0 +1,93 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="glow" aria-hidden="true"></div>
+  <header>
+    <div class="brand">
+      <span class="logo"><img src="icons/icon-32.png" width="20" height="20" alt=""></span>
+      <span class="brand-text">
+        <span class="brand-name">Xenon</span>
+        <span class="brand-sub">Download Manager</span>
+      </span>
+    </div>
+    <span id="version" class="version"></span>
+  </header>
+
+  <!-- Whether the browser reaches the app, and the switch that pauses capture, in one bar. -->
+  <section id="status" class="status" role="status">
+    <span class="dot" aria-hidden="true"></span>
+    <span id="status-text"></span>
+    <label class="switch status-switch" title="">
+      <span class="switch-label" data-i18n="popup_take"></span>
+      <input id="take" type="checkbox">
+    </label>
+  </section>
+  <a id="fix" class="link fix-link" hidden data-i18n="popup_fix" target="_blank" rel="noopener"></a>
+  <p id="declined" class="card declined" hidden><span id="declined-what"></span><span id="declined-why"></span></p>
+
+  <!-- What the tab played: a card for each, its picture, length, qualities and size. -->
+  <section id="media" class="media" hidden>
+    <div class="media-head">
+      <h2 data-i18n="popup_media"></h2>
+      <span id="media-count" class="count" hidden></span>
+      <span class="spacer"></span>
+      <label class="switch mini" id="previews-row">
+        <span class="switch-label" id="previews-label"></span>
+        <input id="previews" type="checkbox" checked>
+      </label>
+      <button id="media-clear" type="button" class="link-btn" hidden></button>
+    </div>
+    <ul id="media-list"></ul>
+    <p id="media-none" class="note empty" data-i18n="popup_media_none" hidden></p>
+    <button id="media-page" type="button" class="accent row glow-btn" hidden></button>
+    <p id="media-said" class="note" role="status" hidden></p>
+  </section>
+
+  <div class="card toggles" id="proxy-card">
+    <label class="switch" id="proxy-row" hidden>
+      <span class="switch-label" data-i18n="popup_proxy"></span>
+      <input id="proxy" type="checkbox">
+    </label>
+  </div>
+
+  <section id="send" class="card send">
+    <h2 data-i18n="popup_send_to"></h2>
+    <div class="choices segmented">
+      <label class="choice"><input type="radio" name="to" id="to-here"> <span data-i18n="popup_send_here"></span></label>
+      <label class="choice"><input type="radio" name="to" id="to-remote"> <span data-i18n="popup_send_remote"></span></label>
+    </div>
+    <div id="remote-form" hidden>
+      <input id="remote-url" type="url" dir="ltr" placeholder="https://192.168.1.10:8463/" aria-labelledby="to-remote">
+      <input id="remote-code" inputmode="numeric" maxlength="9" dir="ltr" data-i18n-placeholder="popup_remote_code">
+      <div class="actions">
+        <button id="remote-open" data-i18n="popup_remote_open"></button>
+        <button id="remote-pair" class="accent" data-i18n="popup_remote_pair"></button>
+      </div>
+      <p class="note" data-i18n="popup_remote_help"></p>
+      <p id="remote-said" class="note bad" role="status" hidden></p>
+    </div>
+  </section>
+
+  <button id="exclude" class="row" hidden></button>
+  <p id="excluded" class="note" hidden></p>
+
+  <div class="actions main-actions">
+    <button id="open" class="accent" data-i18n="popup_open"></button>
+    <button id="options" data-i18n="popup_options"></button>
+  </div>
+
+  <p class="note alt-hint" data-i18n="popup_alt"></p>
+
+  <footer>
+    <span class="footer-links">
+      <a id="help" class="link" data-i18n="popup_help" target="_blank" rel="noopener"></a>
+      <a id="support" class="link" data-i18n="popup_support" target="_blank" rel="noopener"></a>
+    </span>
+  </footer>
+  <script src="popup.js"></script>
+</body>
+</html>
