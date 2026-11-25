@@ -243,3 +243,26 @@ $('options').addEventListener('click', () => {
 $('openFolder').addEventListener('click', () => {
   chrome.runtime.sendMessage({ action: 'open_folder' }).catch(() => {});
 });
+
+async function initUpdateBanner() {
+  try {
+    const stored = await chrome.storage.local.get('ruvitube.updateInfo');
+    const updateInfo = stored && stored['ruvitube.updateInfo'];
+    if (updateInfo && updateInfo.version) {
+      const banner = $('updateBanner');
+      const versionText = $('updateVersionText');
+      const btn = $('btnDownloadUpdate');
+      if (banner && versionText) {
+        versionText.textContent = 'v' + updateInfo.version;
+        banner.hidden = false;
+        if (btn) {
+          btn.addEventListener('click', () => {
+            chrome.tabs.create({ url: updateInfo.downloadUrl || 'https://github.com/mtahiryilmazz/RuviTools/releases/latest' });
+          });
+        }
+      }
+    }
+  } catch (_) {}
+}
+initUpdateBanner();
+

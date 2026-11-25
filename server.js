@@ -50,7 +50,7 @@ async function startServer() {
     setTimeout(() => {
       res.json({
         ok: true,
-        title: 'Saf Rust Media Stream (RuviTools v2.2.0)',
+        title: 'Saf Rust Media Stream (RuviTools v2.5.0)',
         sourceUrl: redactUrl(url),
         streams: [
           { id: 'itag-22', kind: 'video', container: 'mp4', resolution: '1280x720', fps: 30, codecs: 'avc1.64001f, mp4a.40.2', bandwidth_bps: 1850000 },
@@ -111,14 +111,14 @@ async function startServer() {
       ok: true,
       owner,
       repo,
-      currentVersion: '2.4.0',
-      latestVersion: '2.4.0',
+      currentVersion: '2.5.0',
+      latestVersion: '2.5.0',
       updateAvailable: false,
-      releaseName: `${repo} v2.4.0 — Robust HTTP 403 Recovery & Native Speed Upgrades`,
+      releaseName: `${repo} v2.5.0 — 16-Part Asynchronous Range Pipelining & HTTP 403 Recovery`,
       publishedAt: new Date().toISOString(),
       sha256sum: 'f8b2c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b888',
-      downloadUrl: `https://github.com/${owner}/${repo}/releases/latest/download/RuviTube-v2.4.0-chrome.zip`,
-      releaseNotes: '• HTTP 403 automatic token re-fetch & alternate client rotation\n• Zero-junk temp extraction into %LOCALAPPDATA%\\RuviTube\\extension\n• Enhanced RuviHub marketplace integration'
+      downloadUrl: `https://github.com/${owner}/${repo}/releases/latest/download/RuviTube-v2.5.0-chrome.zip`,
+      releaseNotes: '• 16-part asynchronous HTTP Range pipelining for lightning-fast downloads\n• HTTP 403 automatic token re-fetch & alternate client rotation\n• Zero-junk temp extraction into %LOCALAPPDATA%\\RuviTube\\extension\n• Enhanced RuviHub marketplace integration'
     });
   });
 
@@ -129,16 +129,16 @@ async function startServer() {
       branch: 'main',
       syncState: 'ready-for-sync',
       lastSyncedAt: new Date().toISOString(),
-      localVersion: '2.4.0',
+      localVersion: '2.5.0',
       trackedFiles: [
-        { path: 'ruvitube/extension/manifest.json', status: 'updated', version: '2.4.0' },
-        { path: 'ruvitube/extension/background.js', status: 'hardened', fixes: 'HTTP 403 retry & timeout logic' },
+        { path: 'ruvitube/extension/manifest.json', status: 'updated', version: '2.5.0' },
+        { path: 'ruvitube/extension/background.js', status: 'hardened', fixes: '16-part range pipelining & HTTP 403 retry' },
         { path: 'server.js', status: 'updated' },
         { path: 'src/App.tsx', status: 'updated' }
       ],
       gitCommands: [
         'git add ruvitube/extension/manifest.json ruvitube/extension/background.js server.js src/App.tsx',
-        'git commit -m "chore: upgrade RuviTube extension to v2.4.0 and harden download error handling"',
+        'git commit -m "chore: upgrade RuviTube extension to v2.5.0 and implement 16-part range pipelining"',
         'git push origin main'
       ]
     });
@@ -151,8 +151,8 @@ async function startServer() {
       const response = await fetch(rawUrl);
       if (response.ok) {
         const manifest = await response.json();
-        const remoteVersion = manifest.version || '2.4.0';
-        const localVersion = '2.4.0';
+        const remoteVersion = manifest.version || '2.5.0';
+        const localVersion = '2.5.0';
         return res.json({
           ok: true,
           source: 'github-raw-manifest',
@@ -174,8 +174,8 @@ async function startServer() {
       ok: true,
       source: 'fallback-local',
       manifestUrl: rawUrl,
-      remoteVersion: '2.4.0',
-      localVersion: '2.4.0',
+      remoteVersion: '2.5.0',
+      localVersion: '2.5.0',
       updateAvailable: false,
       name: 'RuviTube',
       description: 'RuviTube Extension (Simulated Raw fallback)',
@@ -200,7 +200,7 @@ async function startServer() {
           publishedAt: data.published_at,
           htmlUrl: data.html_url,
           zipUrl: data.zipball_url || `https://github.com/${owner}/${repo}/releases/download/${data.tag_name}/extension.zip`,
-          updateAvailable: data.tag_name !== 'v2.2.0'
+          updateAvailable: data.tag_name !== 'v2.5.0'
         });
       }
     } catch {}
@@ -209,12 +209,12 @@ async function startServer() {
     res.json({
       ok: true,
       source: 'simulated',
-      tagName: 'v2.3.0',
-      name: `${repo} v2.3.0 (RuviHub Release)`,
+      tagName: 'v2.5.0',
+      name: `${repo} v2.5.0 (RuviHub Release)`,
       publishedAt: new Date().toISOString(),
-      htmlUrl: `https://github.com/${owner}/${repo}/releases/tag/v2.3.0`,
-      zipUrl: `https://github.com/${owner}/${repo}/releases/download/v2.3.0/RuviTube-v2.3.0.zip`,
-      updateAvailable: true,
+      htmlUrl: `https://github.com/${owner}/${repo}/releases/tag/v2.5.0`,
+      zipUrl: `https://github.com/${owner}/${repo}/releases/download/v2.5.0/RuviTube-v2.5.0.zip`,
+      updateAvailable: false,
       sha256: 'f8b2c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b888'
     });
   });

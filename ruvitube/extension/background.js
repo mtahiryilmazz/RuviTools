@@ -707,3 +707,37 @@ chrome.runtime.onInstalled.addListener(details => {
     await persist(jobs);
   }).catch(() => {});
 });
+
+async function checkForExtensionUpdates() {
+  try {
+    const res = await fetch('https://raw.githubusercontent.com/mtahiryilmazz/RuviTools/main/ruvitube/extension/manifest.json');
+    if (res.ok) {
+      const remote = await res.json();
+      const remoteVersion = remote.version;
+      const localVersion = chrome.runtime.getManifest().version;
+      if (remoteVersion && remoteVersion !== localVersion) {
+        await chrome.storage.local.set({
+          'ruvitube.updateInfo': {
+            version: remoteVersion,
+            downloadUrl: 'https://github.com/mtahiryilmazz/RuviTools/releases/latest'
+          }
+        });
+        if (chrome.action && typeof chrome.action.setBadgeText === 'function') {
+          chrome.action.setBadgeText({ text: 'UP' });
+          chrome.action.setBadgeBackgroundColor({ color: '#2563eb' });
+        }
+      }
+    }
+  } catch (_) {}
+}
+
+if (chrome.alarms && typeof chrome.alarms.create === 'function') {
+  chrome.alarms.create('checkUpdatesAlarm', { periodInMinutes: 120 });
+  chrome.alarms.onAlarm.addListener(alarm => {
+    if (alarm.name === 'checkUpdatesAlarm') {
+      checkForExtensionUpdates();
+    }
+  });
+}
+checkForExtensionUpdates();
+
